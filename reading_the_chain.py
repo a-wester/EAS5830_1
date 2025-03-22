@@ -68,11 +68,9 @@ def is_ordered_block(w3, block_num):
 		if "maxPriorityFeePerGas" in tx and tx["maxPriorityFeePerGas"] is not None:
 			fee = min(tx["maxPriorityFeePerGas"], tx["maxFeePerGas"] - base_fee)
 		else:
-			# Legacy (Type 0) transaction; for pre-EIP-1559 blocks, base_fee is 0.
 			fee = tx["gasPrice"] - base_fee
 		fees.append(fee)
 	
-	# Check that fees are sorted in non-increasing order (each fee is >= the next one)
 	ordered = all(fees[i] >= fees[i+1] for i in range(len(fees)-1))
 
 	return ordered
@@ -98,8 +96,6 @@ def get_contract_values(contract, admin_address, owner_address):
 	onchain_root = 0  # Get and return the merkleRoot from the provided contract
 	has_role = 0  # Check the contract to see if the address "admin_address" has the role "default_admin_role"
 	prime = 0  # Call the contract to get the prime owned by "owner_address"
-
-	default_admin_role = int.to_bytes(0, 32, byteorder="big")
     
 	onchain_root = contract.functions.merkleRoot().call()
 	has_role = contract.functions.hasRole(default_admin_role, admin_address).call()
