@@ -3,7 +3,7 @@ from eth_account.messages import encode_defunct
 import eth_account
 import os
 
-def sign_message(challenge, filename="secret_key.txt"):
+def sign_message(challenge, filename="/home/codio/workspace/.guides/student_code/EAS5830_1/secret_key.txt"):
     """
     challenge - byte string
     filename - filename of the file that contains your account secret key
