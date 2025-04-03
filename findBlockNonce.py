@@ -20,7 +20,7 @@ def mine_block(k, prev_hash, transactions):
 
     # TODO your code to find a nonce here
     base = prev_hash
-    for line in rand_lines:
+    for line in transactions:
         base += line.encode('utf-8')
 
     nonce_int = 0
@@ -73,3 +73,4 @@ if __name__ == '__main__':
     transactions = get_random_lines(filename, num_lines)
     nonce = mine_block(diff, transactions)
     print(nonce)
+
