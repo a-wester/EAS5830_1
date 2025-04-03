@@ -93,7 +93,7 @@ def build_merkle(leaves):
         for i in range(0, len(prev_level), 2):
             left = prev_level[i]
             right = prev_level[i+1] if i+1 < len(prev_level) else prev_level[i]
-            parent = hash_pair(*sorted([left, right]))
+            parent = hash_pair(left, right)
             level.append(parent)
         tree.append(level)
     return tree
@@ -109,12 +109,12 @@ def prove_merkle(merkle_tree, random_indx):
     merkle_proof = []
     # TODO YOUR CODE HERE
     index = random_indx
-    for level in merkle_tree[:-1]:  # exclude the root
-        sibling_index = index ^ 1  # get sibling index
-        if sibling_index >= len(level):
-            sibling = level[index]  # duplicate self if no sibling
-        else:
+    for level in merkle_tree[:-1]:  # Skip the root level
+        sibling_index = index ^ 1  # Flip last bit to get sibling
+        if sibling_index < len(level):
             sibling = level[sibling_index]
+        else:
+            sibling = level[index]  # Duplicate self if no sibling
         merkle_proof.append(sibling)
         index //= 2
 
@@ -163,7 +163,7 @@ def send_signed_msg(proof, random_leaf):
     })
 
     signed_tx = w3.eth.account.sign_transaction(tx, private_key=acct.key)
-    tx_hash = w3.eth.send_raw_transaction(signed_tx['rawTransaction'])
+    tx_hash = w3.eth.send_raw_transaction(signed_tx.rawTransaction)
 
 
     return tx_hash
