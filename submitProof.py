@@ -116,22 +116,15 @@ def prove_merkle(merkle_tree, random_indx):
     merkle_proof = []
     # TODO YOUR CODE HERE
     index = random_indx
-    for level_idx in range(len(merkle_tree) - 1):  # Exclude the root level
-        level = merkle_tree[level_idx]
-        is_right = current_index % 2 == 1
-        
+    for level in merkle_tree[:-1]:  # skip the root level
+        is_right = index % 2 == 1
         if is_right:
-            # If we're a right node, get the left sibling
-            sibling_idx = current_index - 1
+            sibling_index = index - 1
         else:
-            # If we're a left node, get the right sibling
-            sibling_idx = min(current_index + 1, len(level) - 1)
-        
-        # Add the sibling to our proof
-        proof.append(level[sibling_idx])
-        
-        # Update index for the next level up
-        current_index = current_index // 2
+            sibling_index = index + 1 if index + 1 < len(level) else index  # duplicate if no sibling
+
+        merkle_proof.append(level[sibling_index])
+        index //= 2
 
     return merkle_proof
 
