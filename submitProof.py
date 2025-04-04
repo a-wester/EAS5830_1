@@ -106,30 +106,27 @@ def build_merkle(leaves):
 
 def prove_merkle(merkle_tree, random_indx):
     """
-        Takes a random_index to create a proof of inclusion for and a complete Merkle tree
-        as a list of lists where index 0 is the list of leaves, index 1 is the list of
-        parent hash values, up to index -1 which is the list of the root hash.
-        returns a proof of inclusion as list of values
+        Returns a Merkle proof for the leaf at random_indx.
     """
     merkle_proof = []
-    # TODO YOUR CODE HERE
-    current_idx = random_indx
-    
-    for level in range(len(merkle_tree) - 1):
-        current_level = merkle_tree[level]
-        
-        # Find sibling index
-        sibling_idx = idx + 1 if idx % 2 == 0 else idx - 1
-        
-        # Check if sibling exists (handles edge case at end of odd-length levels)
-        if 0 <= sibling_idx < len(current_level):
-            proof.append(current_level[sibling_idx])
+    current_idx = random_indx  # ✅ correct initialization
+
+    for level in merkle_tree[:-1]:  # skip the root level
+        # Compute sibling index
+        if current_idx % 2 == 0:
+            sibling_idx = current_idx + 1
         else:
-            # If we're at the end of an odd-length level, use the same node as its own sibling
-            proof.append(current_level[idx])
-        
-        # Move to parent index for next level
-        idx = idx // 2
+            sibling_idx = current_idx - 1
+
+        # Check if sibling index is in bounds
+        if sibling_idx < len(level):
+            merkle_proof.append(level[sibling_idx])
+        else:
+            # Duplicate self if there's no sibling
+            merkle_proof.append(level[current_idx])
+
+        # Move to parent index
+        current_idx = current_idx // 2
 
     return merkle_proof
 
