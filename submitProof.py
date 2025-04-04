@@ -115,24 +115,21 @@ def prove_merkle(merkle_tree, random_indx):
     # TODO YOUR CODE HERE
     current_idx = random_indx
     
-    # For each level except the root
-    for level_idx in range(len(merkle_tree) - 1):
-        current_level = merkle_tree[level_idx]
+    for level in range(len(merkle_tree) - 1):
+        current_level = merkle_tree[level]
         
-        # Calculate sibling index
-        if current_idx % 2 == 0:  # If even index
-            sibling_idx = current_idx + 1
-            # If sibling is out of bounds, use the same node
-            if sibling_idx >= len(current_level):
-                sibling_idx = current_idx
-        else:  # If odd index
-            sibling_idx = current_idx - 1
+        # Find sibling index
+        sibling_idx = idx + 1 if idx % 2 == 0 else idx - 1
         
-        # Add sibling to proof
-        merkle_proof.append(current_level[sibling_idx])
+        # Check if sibling exists (handles edge case at end of odd-length levels)
+        if 0 <= sibling_idx < len(current_level):
+            proof.append(current_level[sibling_idx])
+        else:
+            # If we're at the end of an odd-length level, use the same node as its own sibling
+            proof.append(current_level[idx])
         
-        # Update index for next level
-        current_idx = current_idx // 2
+        # Move to parent index for next level
+        idx = idx // 2
 
     return merkle_proof
 
@@ -268,3 +265,4 @@ def hash_pair(a, b):
 
 if __name__ == "__main__":
     merkle_assignment()
+
