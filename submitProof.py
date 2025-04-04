@@ -37,7 +37,7 @@ def merkle_assignment():
         tx_hash = '0x'
         # TODO, when you are ready to attempt to claim a prime (and pay gas fees),
         #  complete this method and run your code with the following line un-commented
-        tx_hash = send_signed_msg(proof, leaves[random_leaf_index])
+        # tx_hash = send_signed_msg(proof, leaves[random_leaf_index])
 
 
 def generate_primes(num_primes):
@@ -70,8 +70,7 @@ def convert_leaves(primes_list):
     """
 
     # TODO YOUR CODE HERE
-    return [Web3.solidity_keccak(['uint256'], [p]) for p in primes_list]
-
+    return [int(p).to_bytes(32, byteorder='big') for p in primes_list]
 
 
 def build_merkle(leaves):
@@ -162,8 +161,7 @@ def send_signed_msg(proof, random_leaf):
     })
 
     signed_tx = w3.eth.account.sign_transaction(tx, private_key=acct.key)
-    tx_hash = w3.eth.send_raw_transaction(signed_tx['rawTransaction']).hex()
-
+    tx_hash = w3.eth.send_raw_transaction(signed_tx.rawTransaction).hex()
 
     return tx_hash
 
