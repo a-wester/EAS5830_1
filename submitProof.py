@@ -111,10 +111,10 @@ def prove_merkle(merkle_tree, random_indx):
     index = random_indx
 
     for level in merkle_tree[:-1]:  # Skip the root level
-        sibling_index = index ^ 1  # XOR with 1 flips last bit
+        sibling_index = index ^ 1  # XOR to get sibling index
         if sibling_index < len(level):
-            proof.append(level[sibling_index])
-        index = index // 2  # Go to parent index
+            merkle_proof.append(level[sibling_index])
+        index = index // 2  # Move to parent index
     return merkle_proof
 
 
