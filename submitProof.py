@@ -87,12 +87,14 @@ def build_merkle(leaves):
     #TODO YOUR CODE HERE
     tree = [leaves]
     while len(tree[-1]) > 1:
-        level = []
         prev_level = tree[-1]
+        level = []
         for i in range(0, len(prev_level), 2):
             left = prev_level[i]
-            right = prev_level[i+1] if i+1 < len(prev_level) else prev_level[i]
-            parent = hash_pair(*sorted([left, right]))
+            right = prev_level[i+1] if i+1 < len(prev_level) else left
+            # Sort the pair before hashing (OpenZeppelin requirement)
+            pair = sorted([left, right])
+            parent = Web3.solidity_keccak(['bytes32', 'bytes32'], pair)
             level.append(parent)
         tree.append(level)
     return tree
