@@ -93,7 +93,7 @@ def build_merkle(leaves):
         for i in range(0, len(level), 2):
             left = level[i]
             right = level[i+1] if i + 1 < len(level) else left
-            next_level.append(hash_pair(left, right))  # no extra sort here
+            next_level.append(hash_pair(*sorted([left, right])))
         tree.append(next_level)
         level = next_level
     
