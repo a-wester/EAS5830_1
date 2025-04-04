@@ -70,19 +70,7 @@ def convert_leaves(primes_list):
     """
 
     # TODO YOUR CODE HERE
-    num = 2
-    while len(primes_list) < num_primes:
-        is_prime = True
-        for p in primes_list:
-            if p * p > num:
-                break
-            if num % p == 0:
-                is_prime = False
-                break
-        if is_prime:
-            primes_list.append(num)
-        num += 1
-    return []
+    return [int(p).to_bytes(32, byteorder='big') for p in primes_list]
 
 
 def build_merkle(leaves):
