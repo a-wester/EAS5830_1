@@ -108,12 +108,15 @@ def prove_merkle(merkle_tree, random_indx):
     """
     merkle_proof = []
     # TODO YOUR CODE HERE
-    for level in tree[:-1]:  # Exclude root
-        sibling_index = index ^ 1  # Flip last bit to get sibling
+    index = random_indx
+
+    for level in merkle_tree[:-1]:  # Skip the root level
+        sibling_index = index ^ 1  # XOR with 1 flips last bit
         if sibling_index < len(level):
             proof.append(level[sibling_index])
-        index = index // 2
+        index = index // 2  # Go to parent index
     return merkle_proof
+
 
 
 def sign_challenge(challenge):
