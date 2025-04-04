@@ -107,16 +107,15 @@ def prove_merkle(merkle_tree, random_indx):
     """
     merkle_proof = []
     # TODO YOUR CODE HERE
+    index = random_indx  # define index at the beginning
     for level in merkle_tree[:-1]:  # don't include the root level
-        # XOR 1 flips the last bit to get the sibling index
         sibling_index = index ^ 1
 
-        # If sibling index is out of bounds, duplicate the node itself
         if sibling_index >= len(level):
             sibling_index = index
 
         merkle_proof.append(level[sibling_index])
-        index //= 2  # move to the next level
+        index //= 2
 
     return merkle_proof
 
