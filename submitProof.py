@@ -34,7 +34,7 @@ def merkle_assignment():
     addr, sig = sign_challenge(challenge)
 
     if sign_challenge_verify(challenge, addr, sig):
-        tx_hash = '0x'
+ = '0x'
         # TODO, when you are ready to attempt to claim a prime (and pay gas fees),
         #  complete this method and run your code with the following line un-commented
         tx_hash = send_signed_msg(proof, leaves[random_leaf_index])
@@ -93,7 +93,7 @@ def build_merkle(leaves):
         for i in range(0, len(prev_level), 2):
             left = prev_level[i]
             right = prev_level[i+1] if i+1 < len(prev_level) else prev_level[i]
-            parent = hash_pair(left, right)
+            parent = hash_pair(*sorted([left, right]))
             level.append(parent)
         tree.append(level)
     return tree
@@ -163,7 +163,8 @@ def send_signed_msg(proof, random_leaf):
     })
 
     signed_tx = w3.eth.account.sign_transaction(tx, private_key=acct.key)
-    tx_hash = w3.eth.send_raw_transaction(signed_tx.rawTransaction)
+    tx_hash = w3.eth.send_raw_transaction(signed_tx['rawTransaction'])
+
 
 
     return tx_hash
