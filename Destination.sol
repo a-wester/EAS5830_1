@@ -52,8 +52,8 @@ contract Destination is AccessControl {
     address wrapped_address = address(token);
 
     // ✅ Correct direction:
-    wrapped_tokens[_underlying_token] = wrapped_address;          // source token → wrapped token
-    underlying_tokens[wrapped_address] = _underlying_token;       // wrapped token → source token
+		underlying_tokens[_underlying_token] = wrapped_address;  // ✅ source ➡️ wrapped
+		wrapped_tokens[wrapped_address] = _underlying_token;     // ✅ wrapped ➡️ source
 
     tokens.push(wrapped_address);
 
@@ -62,5 +62,4 @@ contract Destination is AccessControl {
 	}
 
 }
-
 
