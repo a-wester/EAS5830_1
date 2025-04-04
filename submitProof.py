@@ -86,15 +86,23 @@ def build_merkle(leaves):
 
     #TODO YOUR CODE HERE
     tree = [leaves]
-    while len(tree[-1]) > 1:
-        prev_level = tree[-1]
-        level = []
-        for i in range(0, len(prev_level), 2):
-            left = prev_level[i]
-            right = prev_level[i + 1] if i + 1 < len(prev_level) else left
-            parent = hash_pair(left, right)  # Use the helper, which already sorts
-            level.append(parent)
+    level = leaves
+    
+    while len(level) > 1:
+        next_level = []
+        # Process pairs in the current level
+        for i in range(0, len(level), 2):
+            # If we have an odd number of elements and this is the last one
+            if i + 1 >= len(level):
+                # Duplicate the last element when it has no pair
+                next_level.append(hash_pair(level[i], level[i]))
+            else:
+                # Hash the pair
+                next_level.append(hash_pair(level[i], level[i+1]))
+        
+        level = next_level
         tree.append(level)
+    
     return tree
 
 
