@@ -25,7 +25,7 @@ def merkle_assignment():
     tree = build_merkle(leaves)
 
     # Select a random leaf and create a proof for that leaf
-    random_leaf_index = random.randint(1, len(leaves) - 1) #TODO generate a random index from primes to claim (0 is already claimed)
+    random_leaf_index = random.randint(1, num_of_primes - 1) #TODO generate a random index from primes to claim (0 is already claimed)
     proof = prove_merkle(tree, random_leaf_index)
 
     # This is the same way the grader generates a challenge for sign_challenge()
@@ -68,82 +68,48 @@ def convert_leaves(primes_list):
         Converts the leaves (primes_list) to bytes32 format
         returns list of primes where list entries are bytes32 encodings of primes_list entries
     """
-    leaves = []
+
     # TODO YOUR CODE HERE
-    for prime in primes_list:
-        pb = prime.to_bytes(32, byteorder='big')  # 32-byte padded
-        leaves.append(Web3.keccak(pb))  # hash it to get bytes32
-    return leaves
+    num = 2
+    while len(primes_list) < num_primes:
+        is_prime = True
+        for p in primes_list:
+            if p * p > num:
+                break
+            if num % p == 0:
+                is_prime = False
+                break
+        if is_prime:
+            primes_list.append(num)
+        num += 1
+    return []
 
 
 def build_merkle(leaves):
     """
-    Function to build a Merkle Tree from a list of leaves
-    Returns a list of levels where each level is a list of hashes
+        Function to build a Merkle Tree from the list of prime numbers in bytes32 format
+        Returns the Merkle tree (tree) as a list where tree[0] is the list of leaves,
+        tree[1] is the parent hashes, and so on until tree[n] which is the root hash
+        the root hash produced by the "hash_pair" helper function
     """
-    if len(leaves) == 0:
-        return [[]]
-    
-    tree = [leaves]
-    level = leaves
-    
-    # Continue until we reach the root (a single hash)
-    while len(level) > 1:
-        # Create the next level up by pairing adjacent nodes
-        next_level = []
-        
-        # Iterate through pairs of elements
-        for i in range(0, len(level), 2):
-            # If we have a pair, hash them together
-            if i + 1 < len(level):
-                next_level.append(hash_pair(level[i], level[i+1]))
-            # If we have an odd element left over, duplicate it and hash
-            else:
-                next_level.append(hash_pair(level[i], level[i]))
-        
-        # Add this level to our tree and continue to the next level
-        tree.append(next_level)
-        level = next_level
-        
+
+    #TODO YOUR CODE HERE
+    tree = []
+
     return tree
 
-def prove_merkle(merkle_tree, leaf_index):
+
+def prove_merkle(merkle_tree, random_indx):
     """
-    Generate a Merkle proof for the leaf at the given index
-    Returns a list of sibling hashes needed to reconstruct the root
+        Takes a random_index to create a proof of inclusion for and a complete Merkle tree
+        as a list of lists where index 0 is the list of leaves, index 1 is the list of
+        parent hash values, up to index -1 which is the list of the root hash.
+        returns a proof of inclusion as list of values
     """
-    if leaf_index < 0 or leaf_index >= len(merkle_tree[0]):
-        raise ValueError("Leaf index out of range")
-    
-    proof = []
-    idx = leaf_index
-    
-    # For each level (except the root)
-    for level in range(len(merkle_tree) - 1):
-        current_level = merkle_tree[level]
-        level_size = len(current_level)
-        
-        # Is this a left node or right node?
-        is_right_node = idx % 2 == 1
-        
-        if is_right_node:
-            # If right node, sibling is to the left
-            sibling_idx = idx - 1
-        else:
-            # If left node, sibling is to the right (if it exists)
-            sibling_idx = idx + 1
-            # If no right sibling exists (at the end of an odd-length level)
-            if sibling_idx >= level_size:
-                # In this case, the node is paired with itself
-                sibling_idx = idx
-        
-        # Add the sibling to the proof
-        proof.append(current_level[sibling_idx])
-        
-        # Update the index for the next level up
-        idx = idx // 2
-    
-    return proof
+    merkle_proof = []
+    # TODO YOUR CODE HERE
+
+    return merkle_proof
 
 
 def sign_challenge(challenge):
@@ -160,8 +126,8 @@ def sign_challenge(challenge):
     eth_sk = acct.key
 
     # TODO YOUR CODE HERE
-    eth_encoded_msg = eth_account.messages.encode_defunct(text=challenge)
-    eth_sig_obj = eth_account.Account.sign_message(eth_encoded_msg, private_key=eth_sk)
+    eth_sig_obj = 'placeholder'
+
     return addr, eth_sig_obj.signature.hex()
 
 
@@ -179,18 +145,6 @@ def send_signed_msg(proof, random_leaf):
 
     # TODO YOUR CODE HERE
     tx_hash = 'placeholder'
-    contract = w3.eth.contract(address=address, abi=abi)
-    tx = contract.functions.submit(proof, random_leaf).build_transaction({
-        'nonce': w3.eth.get_transaction_count(acct.address),
-        'gas': 250000,
-        'gasPrice': w3.to_wei('10', 'gwei'),
-        'chainId': 97  # BSC testnet
-    })
-
-    signed_tx = w3.eth.account.sign_transaction(tx, private_key=acct.key)
-    tx_hash = w3.eth.send_raw_transaction(signed_tx['rawTransaction'])
-
-
 
     return tx_hash
 
@@ -277,4 +231,3 @@ def hash_pair(a, b):
 
 if __name__ == "__main__":
     merkle_assignment()
-
