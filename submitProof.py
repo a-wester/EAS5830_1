@@ -70,7 +70,8 @@ def convert_leaves(primes_list):
     """
 
     # TODO YOUR CODE HERE
-    return [int(p).to_bytes(32, byteorder='big') for p in primes_list]
+    return [Web3.solidity_keccak(['uint256'], [p]) for p in primes_list]
+
 
 
 def build_merkle(leaves):
