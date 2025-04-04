@@ -116,14 +116,22 @@ def prove_merkle(merkle_tree, random_indx):
     merkle_proof = []
     # TODO YOUR CODE HERE
     index = random_indx
-    for level in merkle_tree[:-1]:  # Skip the root level
-        sibling_index = index ^ 1  # Flip last bit to get sibling
-        if sibling_index < len(level):
-            sibling = level[sibling_index]
+    for level_idx in range(len(merkle_tree) - 1):  # Exclude the root level
+        level = merkle_tree[level_idx]
+        is_right = current_index % 2 == 1
+        
+        if is_right:
+            # If we're a right node, get the left sibling
+            sibling_idx = current_index - 1
         else:
-            sibling = level[index]  # Duplicate self if no sibling
-        merkle_proof.append(sibling)
-        index //= 2
+            # If we're a left node, get the right sibling
+            sibling_idx = min(current_index + 1, len(level) - 1)
+        
+        # Add the sibling to our proof
+        proof.append(level[sibling_idx])
+        
+        # Update index for the next level up
+        current_index = current_index // 2
 
     return merkle_proof
 
@@ -259,3 +267,4 @@ def hash_pair(a, b):
 
 if __name__ == "__main__":
     merkle_assignment()
+
