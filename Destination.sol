@@ -51,8 +51,8 @@ contract Destination is AccessControl {
         BridgeToken token = new BridgeToken(_underlying_token, name, symbol, address(this));
         address wrapped_address = address(token);
 
-        underlying_tokens[_underlying_token] = wrapped_address;
-        wrapped_tokens[wrapped_address] = _underlying_token;
+        wrapped_tokens[_underlying_token] = wrapped_address; // maps source token -> wrapped
+				underlying_tokens[wrapped_address] = _underlying_token; // maps wrapped -> source
         tokens.push(wrapped_address);
 
         emit Creation(_underlying_token, wrapped_address);
@@ -60,5 +60,3 @@ contract Destination is AccessControl {
 	}
 
 }
-
-
