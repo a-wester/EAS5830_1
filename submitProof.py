@@ -118,7 +118,6 @@ def prove_merkle(merkle_tree, random_indx):
     return merkle_proof
 
 
-
 def sign_challenge(challenge):
     """
         Takes a challenge (string)
@@ -133,7 +132,8 @@ def sign_challenge(challenge):
     eth_sk = acct.key
 
     # TODO YOUR CODE HERE
-    eth_sig_obj = 'placeholder'
+    eth_encoded_msg = eth_account.messages.encode_defunct(text=challenge)
+    eth_sig_obj = eth_account.Account.sign_message(eth_encoded_msg, private_key=eth_sk)
 
     return addr, eth_sig_obj.signature.hex()
 
