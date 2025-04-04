@@ -108,10 +108,12 @@ def prove_merkle(merkle_tree, random_indx):
     """
     merkle_proof = []
     # TODO YOUR CODE HERE
-    for level in merkle_tree[:-1]:  # exclude the root level
-        sibling_index = index ^ 1  # flip last bit to get sibling
+    index = random_indx
+
+    for level in merkle_tree[:-1]:  # skip the root level
+        sibling_index = index ^ 1  # get sibling index
         if sibling_index >= len(level):
-            sibling_index = index  # duplicate if no sibling
+            sibling_index = index  # duplicate if no sibling exists
         merkle_proof.append(level[sibling_index])
         index //= 2
 
@@ -249,4 +251,3 @@ def hash_pair(a, b):
 
 if __name__ == "__main__":
     merkle_assignment()
-
