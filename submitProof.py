@@ -78,57 +78,72 @@ def convert_leaves(primes_list):
 
 def build_merkle(leaves):
     """
-        Function to build a Merkle Tree from the list of prime numbers in bytes32 format
-        Returns the Merkle tree (tree) as a list where tree[0] is the list of leaves,
-        tree[1] is the parent hashes, and so on until tree[n] which is the root hash
-        the root hash produced by the "hash_pair" helper function
+    Function to build a Merkle Tree from a list of leaves
+    Returns a list of levels where each level is a list of hashes
     """
-    tree=[leaves]
-    #TODO YOUR CODE HERE
-    current_level = leaves
-
-    while len(current_level) > 1:
+    if len(leaves) == 0:
+        return [[]]
+    
+    tree = [leaves]
+    level = leaves
+    
+    # Continue until we reach the root (a single hash)
+    while len(level) > 1:
+        # Create the next level up by pairing adjacent nodes
         next_level = []
-        for i in range(0, len(current_level), 2):
-            # If this is the last element and we have an odd number
-            if i + 1 >= len(current_level):
-                # Duplicate the last element
-                parent = hash_pair(current_level[i], current_level[i])
-            else:
-                # Normal case - hash the pair
-                parent = hash_pair(current_level[i], current_level[i+1])
-            next_level.append(parent)
         
+        # Iterate through pairs of elements
+        for i in range(0, len(level), 2):
+            # If we have a pair, hash them together
+            if i + 1 < len(level):
+                next_level.append(hash_pair(level[i], level[i+1]))
+            # If we have an odd element left over, duplicate it and hash
+            else:
+                next_level.append(hash_pair(level[i], level[i]))
+        
+        # Add this level to our tree and continue to the next level
         tree.append(next_level)
-        current_level = next_level
+        level = next_level
+        
     return tree
 
-
-def prove_merkle(merkle_tree, random_indx):
+def prove_merkle(merkle_tree, leaf_index):
     """
-        Returns a Merkle proof for the leaf at random_indx.
+    Generate a Merkle proof for the leaf at the given index
+    Returns a list of sibling hashes needed to reconstruct the root
     """
-    merkle_proof = []
-    current_idx = random_indx  # ✅ correct initialization
-
-    for level in merkle_tree[:-1]:  # skip the root level
-        # Compute sibling index
-        if current_idx % 2 == 0:
-            sibling_idx = current_idx + 1
+    if leaf_index < 0 or leaf_index >= len(merkle_tree[0]):
+        raise ValueError("Leaf index out of range")
+    
+    proof = []
+    idx = leaf_index
+    
+    # For each level (except the root)
+    for level in range(len(merkle_tree) - 1):
+        current_level = merkle_tree[level]
+        level_size = len(current_level)
+        
+        # Is this a left node or right node?
+        is_right_node = idx % 2 == 1
+        
+        if is_right_node:
+            # If right node, sibling is to the left
+            sibling_idx = idx - 1
         else:
-            sibling_idx = current_idx - 1
-
-        # Check if sibling index is in bounds
-        if sibling_idx < len(level):
-            merkle_proof.append(level[sibling_idx])
-        else:
-            # Duplicate self if there's no sibling
-            merkle_proof.append(level[current_idx])
-
-        # Move to parent index
-        current_idx = current_idx // 2
-
-    return merkle_proof
+            # If left node, sibling is to the right (if it exists)
+            sibling_idx = idx + 1
+            # If no right sibling exists (at the end of an odd-length level)
+            if sibling_idx >= level_size:
+                # In this case, the node is paired with itself
+                sibling_idx = idx
+        
+        # Add the sibling to the proof
+        proof.append(current_level[sibling_idx])
+        
+        # Update the index for the next level up
+        idx = idx // 2
+    
+    return proof
 
 
 def sign_challenge(challenge):
