@@ -89,17 +89,16 @@ def build_merkle(leaves):
 
     while len(current_level) > 1:
         next_level = []
-        # Only process pairs
-        for i in range(0, len(current_level)-1, 2):
-            left = current_level[i]
-            right = current_level[i + 1]
-            parent = hash_pair(left, right)
+        for i in range(0, len(current_level), 2):
+            # If this is the last element and we have an odd number
+            if i + 1 >= len(current_level):
+                # Duplicate the last element
+                parent = hash_pair(current_level[i], current_level[i])
+            else:
+                # Normal case - hash the pair
+                parent = hash_pair(current_level[i], current_level[i+1])
             next_level.append(parent)
-            
-        # Handle the case where there's an odd number of elements
-        if len(current_level) % 2 == 1:
-            next_level.append(current_level[-1])
-            
+        
         tree.append(next_level)
         current_level = next_level
     return tree
@@ -114,14 +113,26 @@ def prove_merkle(merkle_tree, random_indx):
     """
     merkle_proof = []
     # TODO YOUR CODE HERE
-    index = random_indx
-
-    for level in merkle_tree[:-1]:  # skip the root level
-        sibling_index = index ^ 1  # get sibling index
-        if sibling_index >= len(level):
-            sibling_index = index  # duplicate if no sibling exists
-        merkle_proof.append(level[sibling_index])
-        index //= 2
+    current_idx = random_indx
+    
+    # For each level except the root
+    for level_idx in range(len(merkle_tree) - 1):
+        current_level = merkle_tree[level_idx]
+        
+        # Calculate sibling index
+        if current_idx % 2 == 0:  # If even index
+            sibling_idx = current_idx + 1
+            # If sibling is out of bounds, use the same node
+            if sibling_idx >= len(current_level):
+                sibling_idx = current_idx
+        else:  # If odd index
+            sibling_idx = current_idx - 1
+        
+        # Add sibling to proof
+        merkle_proof.append(current_level[sibling_idx])
+        
+        # Update index for next level
+        current_idx = current_idx // 2
 
     return merkle_proof
 
