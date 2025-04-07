@@ -82,16 +82,15 @@ def build_merkle(leaves):
     """
 
     #TODO YOUR CODE HERE
-    tree = [leaves]  # tree[0] = leaves
+    tree = [leaves]
 
     while len(tree[-1]) > 1:
         level = tree[-1]
         new_level = []
 
-        # Hash pairs together
         for i in range(0, len(level), 2):
             left = level[i]
-            right = level[i+1] if i+1 < len(level) else level[i]  # Duplicate last if odd
+            right = level[i+1] if i+1 < len(level) else level[i]
             new_level.append(hash_pair(left, right))
 
         tree.append(new_level)
@@ -110,11 +109,11 @@ def prove_merkle(merkle_tree, random_indx):
     # TODO YOUR CODE HERE
     index = random_indx
 
-    for level in merkle_tree[:-1]:  # Skip the root level
-        sibling_index = index ^ 1  # XOR to get sibling index
+    for level in merkle_tree[:-1]:
+        sibling_index = index ^ 1
         if sibling_index < len(level):
             merkle_proof.append(level[sibling_index])
-        index = index // 2  # Move to parent index
+        index = index // 2
     return merkle_proof
 
 
