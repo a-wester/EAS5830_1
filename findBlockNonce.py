@@ -29,10 +29,8 @@ def mine_block(k, prev_hash, transactions):
         hash_input = base + nonce
         hash_result = hashlib.sha256(hash_input).digest()
 
-        # Convert hash to binary string
         hash_bin = bin(int.from_bytes(hash_result, byteorder='big'))
 
-        # Count trailing zero bits
         trailing_zeros = len(hash_bin) - len(hash_bin.rstrip('0'))
 
         if trailing_zeros >= k:
@@ -73,4 +71,3 @@ if __name__ == '__main__':
     transactions = get_random_lines(filename, num_lines)
     nonce = mine_block(diff, transactions)
     print(nonce)
-
