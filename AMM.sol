@@ -58,29 +58,21 @@ contract AMM is AccessControl{
 
 		//YOUR CODE HERE 
 
-  // Determine which is the buy token
   address buyToken = (sellToken == tokenA) ? tokenB : tokenA;
 
-  // Apply fee to the sellAmount
   uint256 feeAdjAmount = (sellAmount * (10000 - feebps)) / 10000;
 
-  // Transfer full sell amount from sender to contract
   ERC20(sellToken).transferFrom(msg.sender, address(this), sellAmount);
 
-  // Get current reserves BEFORE trade
   uint256 reserveInBefore = ERC20(sellToken).balanceOf(address(this)) - sellAmount;
   uint256 reserveOut = ERC20(buyToken).balanceOf(address(this));
 
-  // Calculate how much output the trader should receive based on the fee-adjusted input
   uint256 newReserveIn = reserveInBefore + feeAdjAmount;
   uint256 newReserveOut = invariant / newReserveIn;
   uint256 buyAmount = reserveOut - newReserveOut;
 
-
-  // Send tokens back to user
   ERC20(buyToken).transfer(msg.sender, buyAmount);
 
-  // Emit event
   emit Swap(sellToken, buyToken, sellAmount, buyAmount);
 
 		uint256 new_invariant = ERC20(tokenA).balanceOf(address(this))*ERC20(tokenB).balanceOf(address(this));
@@ -101,10 +93,9 @@ contract AMM is AccessControl{
     ERC20(tokenB).transferFrom(msg.sender, address(this), amtB);
     }
 
-// Update the invariant after liquidity is added
-invariant = ERC20(tokenA).balanceOf(address(this)) * ERC20(tokenB).balanceOf(address(this));
+		invariant = ERC20(tokenA).balanceOf(address(this)) * ERC20(tokenB).balanceOf(address(this));
 		emit LiquidityProvision( msg.sender, amtA, amtB );
-	}
+		}
 
 	/*
 		Use the ERC20 transfer function to send amtA of tokenA and amtB of tokenB to the target recipient
@@ -125,3 +116,4 @@ invariant = ERC20(tokenA).balanceOf(address(this)) * ERC20(tokenB).balanceOf(add
 
 
 }
+
