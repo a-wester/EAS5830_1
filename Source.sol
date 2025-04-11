@@ -26,7 +26,6 @@ contract Source is AccessControl {
     require(approved[_token], "Token not registered");
     require(_amount > 0, "Amount must be greater than 0");
 
-    // Pull tokens from sender into this contract
     bool success = IERC20(_token).transferFrom(msg.sender, address(this), _amount);
     require(success, "Token transfer failed");
 
@@ -37,7 +36,6 @@ contract Source is AccessControl {
 		//YOUR CODE HERE
     require(_amount > 0, "Amount must be greater than 0");
 
-    // Transfer tokens to the recipient
     bool success = IERC20(_token).transfer(_recipient, _amount);
     require(success, "Token transfer failed");
 
