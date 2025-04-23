@@ -272,48 +272,64 @@ def create_missing_tokens():
     dest_contract = w3_dest.eth.contract(address=dest_address, abi=info["destination"]["abi"])
 
     tokens_to_create = [
-        "0xc677c31AD31F73A5290f5ef067F8CEF8d301e45c",
+        #"0xc677c31AD31F73A5290f5ef067F8CEF8d301e45c",
         "0x0773b81e0524447784CcE1F3808fed6AaA156eC8"
     ]
 
     name = "Wrapped Token"
     symbol = "WTKN"
 
-    for token in tokens_to_create:
-        try:
-            # ✅ Get fresh nonce each time
-            nonce = w3_dest.eth.get_transaction_count(warden_address)
-            
-            # Try to create the token
-            try:
-                # Removed the getWrappedToken check since it doesn't exist in the ABI
-                tx = dest_contract.functions.createToken(
-                    Web3.to_checksum_address(token),
-                    name,
-                    symbol
-                ).build_transaction({
-                    'from': warden_address,
-                    'gas': 2000000,  # This is correct per your professor
-                    'gasPrice': w3_dest.eth.gas_price,
-                    'nonce': nonce,
-                })
+    # Create tokens one at a time with proper error handling
+    # First token
+    try:
+        # Get the current nonce
+        nonce = w3_dest.eth.get_transaction_count(warden_address)
+        print(f"Creating token {tokens_to_create[0]} with nonce {nonce}")
+        
+        tx = dest_contract.functions.createToken(
+            Web3.to_checksum_address(tokens_to_create[0]),
+            name,
+            symbol
+        ).build_transaction({
+            'from': warden_address,
+            'gas': 2000000,
+            'gasPrice': w3_dest.eth.gas_price,
+            'nonce': nonce,
+        })
 
-                signed_tx = w3_dest.eth.account.sign_transaction(tx, warden_key)
-                tx_hash = w3_dest.eth.send_raw_transaction(signed_tx.raw_transaction)
-                receipt = w3_dest.eth.wait_for_transaction_receipt(tx_hash)
-                print(f"Created token {token}: {tx_hash.hex()}")
-            except Exception as e:
-                # Check if the error is because the token already exists
-                if "execution reverted" in str(e) and "already exists" in str(e):
-                    print(f"Token {token} already exists, skipping.")
-                else:
-                    raise e
-            
-            # Add a delay between token creations to avoid rate limiting
-            time.sleep(2)
+        signed_tx = w3_dest.eth.account.sign_transaction(tx, warden_key)
+        tx_hash = w3_dest.eth.send_raw_transaction(signed_tx.raw_transaction)
+        receipt = w3_dest.eth.wait_for_transaction_receipt(tx_hash)
+        print(f"Created token {tokens_to_create[0]}: {tx_hash.hex()}")
+    except Exception as e:
+        print(f"Failed to create token {tokens_to_create[0]}: {e}")
+    
+    # Always wait between transactions
+    time.sleep(5)
+    
+    # Second token (with fresh nonce)
+    try:
+        # Get a new nonce - this is crucial!
+        nonce = w3_dest.eth.get_transaction_count(warden_address)
+        print(f"Creating token {tokens_to_create[1]} with nonce {nonce}")
+        
+        tx = dest_contract.functions.createToken(
+            Web3.to_checksum_address(tokens_to_create[1]),
+            name,
+            symbol
+        ).build_transaction({
+            'from': warden_address,
+            'gas': 2000000,
+            'gasPrice': w3_dest.eth.gas_price,
+            'nonce': nonce,
+        })
 
-        except Exception as e:
-            print(f"Failed to create token {token}: {e}")
+        signed_tx = w3_dest.eth.account.sign_transaction(tx, warden_key)
+        tx_hash = w3_dest.eth.send_raw_transaction(signed_tx.raw_transaction)
+        receipt = w3_dest.eth.wait_for_transaction_receipt(tx_hash)
+        print(f"Created token {tokens_to_create[1]}: {tx_hash.hex()}")
+    except Exception as e:
+        print(f"Failed to create token {tokens_to_create[1]}: {e}")
 
 
 if __name__ == "__main__":
