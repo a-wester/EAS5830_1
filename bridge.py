@@ -334,7 +334,7 @@ def create_missing_tokens():
 
 if __name__ == "__main__":
     # register_tokens()
-    create_missing_tokens()
+    # create_missing_tokens()
     
     # Add delay between operations
     time.sleep(2)
