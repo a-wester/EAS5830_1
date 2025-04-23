@@ -120,47 +120,108 @@ def scan_blocks(chain, contract_info="contract_info.json"):
             print(f"Found {len(deposit_events)} Deposit events")
 
             for event in deposit_events:
-                parsed_event = source_contract.events.Deposit().process_log(event)
-                token = parsed_event.args.token
-                recipient = parsed_event.args.recipient
-                amount = parsed_event.args.amount
+                try:
+                    parsed_event = source_contract.events.Deposit().process_log(event)
+                    token = parsed_event.args.token
+                    recipient = parsed_event.args.recipient
+                    amount = parsed_event.args.amount
 
-                print(f"Found Deposit: Token: {token}, Recipient: {recipient}, Amount: {amount}")
+                    print(f"Found Deposit: Token: {token}, Recipient: {recipient}, Amount: {amount}")
 
-                # Get a fresh nonce for each transaction
-                nonce = w3_dest.eth.get_transaction_count(warden_address)
+                    # Get a fresh nonce for each transaction
+                    nonce = w3_dest.eth.get_transaction_count(warden_address)
 
-                wrap_tx = dest_contract.functions.wrap(
-                    token,
-                    recipient,
-                    amount
-                ).build_transaction({
-                    'from': warden_address,
-                    'gas': 200000,  # Increased gas limit
-                    'gasPrice': w3_dest.eth.gas_price,
-                    'nonce': nonce,
-                })
+                    wrap_tx = dest_contract.functions.wrap(
+                        token,
+                        recipient,
+                        amount
+                    ).build_transaction({
+                        'from': warden_address,
+                        'gas': 200000,
+                        'gasPrice': w3_dest.eth.gas_price,
+                        'nonce': nonce,
+                    })
 
-                signed_tx = w3_dest.eth.account.sign_transaction(wrap_tx, warden_key)
-                tx_hash = w3_dest.eth.send_raw_transaction(signed_tx.raw_transaction)
+                    signed_tx = w3_dest.eth.account.sign_transaction(wrap_tx, warden_key)
+                    tx_hash = w3_dest.eth.send_raw_transaction(signed_tx.raw_transaction)
 
-                print(f"Sent wrap transaction: {tx_hash.hex()}")
+                    print(f"Sent wrap transaction: {tx_hash.hex()}")
 
-                receipt = w3_dest.eth.wait_for_transaction_receipt(tx_hash)
-                if receipt.status == 1:
-                    print("Wrap transaction succeeded")
-                else:
-                    print("Wrap transaction failed")
+                    receipt = w3_dest.eth.wait_for_transaction_receipt(tx_hash)
+                    if receipt.status == 1:
+                        print("Wrap transaction succeeded")
+                    else:
+                        print("Wrap transaction failed")
+                except Exception as e:
+                    print(f"Error processing deposit event: {e}")
+                    continue
 
         except Exception as e:
             print(f"Error processing Deposit events: {e}")
 
     elif chain == 'destination':
-        # For destination chain, we'll skip scanning and just log that we checked
-        # This is to avoid the 'limit exceeded' errors that keep happening
-        print(f"Checking destination chain (blocks {start_block_dest} to {current_block_dest})")
-        print("Skipping detailed block scanning due to RPC limits. Would have checked for Unwrap events.")
-        return 1
+        print(f"Scanning blocks {start_block_dest} to {current_block_dest} on destination chain")
+        
+        try:
+            # Process each block individually to avoid rate limits
+            for block_num in range(start_block_dest, current_block_dest + 1):
+                try:
+                    time.sleep(0.5)  # Add a small delay between block requests
+                    
+                    unwrap_topic = w3_dest.keccak(text="Unwrap(address,address,uint256)").hex()
+                    
+                    # Get logs for a single block
+                    unwrap_events = retry_rpc_call(
+                        w3_dest.eth.get_logs,
+                        {
+                            'fromBlock': block_num,
+                            'toBlock': block_num,
+                            'address': dest_address,
+                            'topics': [unwrap_topic]
+                        }
+                    )
+                    
+                    print(f"Found {len(unwrap_events)} Unwrap events in block {block_num}")
+                    
+                    for event in unwrap_events:
+                        parsed_event = dest_contract.events.Unwrap().process_log(event)
+                        token = parsed_event.args.underlying_token
+                        recipient = parsed_event.args.to
+                        amount = parsed_event.args.amount
+                        
+                        print(f"Found Unwrap: Token: {token}, Recipient: {recipient}, Amount: {amount}")
+                        
+                        # Always get a fresh nonce for each transaction
+                        nonce = w3_source.eth.get_transaction_count(warden_address)
+                        
+                        withdraw_tx = source_contract.functions.withdraw(
+                            token,
+                            recipient,
+                            amount
+                        ).build_transaction({
+                            'from': warden_address,
+                            'gas': 200000,
+                            'gasPrice': w3_source.eth.gas_price,
+                            'nonce': nonce,
+                        })
+                        
+                        signed_tx = w3_source.eth.account.sign_transaction(withdraw_tx, warden_key)
+                        tx_hash = w3_source.eth.send_raw_transaction(signed_tx.raw_transaction)
+                        
+                        print(f"Sent withdraw transaction: {tx_hash.hex()}")
+                        
+                        receipt = w3_source.eth.wait_for_transaction_receipt(tx_hash)
+                        if receipt.status == 1:
+                            print("Withdraw transaction succeeded")
+                        else:
+                            print("Withdraw transaction failed")
+                            
+                except Exception as e:
+                    print(f"Error processing block {block_num}: {e}")
+                    continue
+                    
+        except Exception as e:
+            print(f"Error scanning destination chain: {e}")
 
     return 1
 
@@ -333,12 +394,11 @@ def create_missing_tokens():
 
 
 if __name__ == "__main__":
+    # Professor already created the tokens, so keep this commented out
     # register_tokens()
-    #create_missing_tokens()
+    # create_missing_tokens()
     
-    # Add delay between operations
-    # time.sleep(2)
-    
+    # Run the scanning operations
     scan_blocks('source')
     
     # Add delay between chain operations
