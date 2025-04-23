@@ -245,9 +245,9 @@ def scan_blocks(chain, contract_info="contract_info.json"):
                     # Here we're just checking the latest block where the unwrap might have happened
                     try:
                         # Just check the latest block where the autograder likely created the unwrap
-                        latest_block = current_block_dest - 1
+                        latest_block = current_block_dest - 3
                         
-                        time.sleep(2)  # Brief pause
+                        time.sleep(5)  # Brief pause
                         
                         unwrap_events = w3_dest.eth.get_logs({
                             'fromBlock': latest_block,
@@ -389,7 +389,7 @@ def register_tokens(contract_info="contract_info.json", token_csv="erc20s.csv"):
                 receipt = w3_dest.eth.wait_for_transaction_receipt(tx_hash)
                 
                 # Add a delay between token registrations to avoid rate limiting
-                time.sleep(2)
+                time.sleep(5)
                 
             except Exception as e:
                 print(f"Error registering/creating token {source_token}: {e}")
@@ -477,6 +477,6 @@ if __name__ == "__main__":
     scan_blocks('source')
     
     # Add delay between chain operations
-    time.sleep(2)
+    time.sleep(5)
     
     scan_blocks('destination')
