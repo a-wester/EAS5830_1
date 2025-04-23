@@ -48,23 +48,18 @@ def scan_blocks(chain, contract_info="contract_info.json"):
         print(f"Invalid chain: {chain}")
         return 0
 
-    # Load contract information
     with open(contract_info, 'r') as f:
         info = json.load(f)
 
-    # Connect to both chains
     w3_source = connect_to('source')
     w3_dest = connect_to('destination')
 
-    # Get contract addresses
     source_address = Web3.to_checksum_address(info["source"]["address"])
     dest_address = Web3.to_checksum_address(info["destination"]["address"])
 
-    # Get warden info
-    warden_address = Web3.to_checksum_address("0x3b178a0a54730C2AAe0b327C77aF2d78F3Dca55B")  # Hardcoded warden address
-    warden_key = "0xc72d903f58f9b5aecfc15ca6916720a88cc8b090e27ce9bb0db52bb0cd05c1d3"  # Hardcoded warden private key
+    warden_address = Web3.to_checksum_address("0x3b178a0a54730C2AAe0b327C77aF2d78F3Dca55B")
+    warden_key = "0xc72d903f58f9b5aecfc15ca6916720a88cc8b090e27ce9bb0db52bb0cd05c1d3"
 
-    # Initialize contracts
     source_contract = w3_source.eth.contract(
         address=source_address,
         abi=info["source"]["abi"]
@@ -75,40 +70,35 @@ def scan_blocks(chain, contract_info="contract_info.json"):
         abi=info["destination"]["abi"]
     )
 
-    # Get current block numbers
     current_block_source = w3_source.eth.block_number
     current_block_dest = w3_dest.eth.block_number
 
-    # Calculate starting blocks (last 5 blocks)
     start_block_source = max(0, current_block_source - 5)
-    start_block_dest = max(0, current_block_dest - 5)  # Ensure that start_block_dest is defined
+    start_block_dest = max(0, current_block_dest - 2)
 
     if chain == 'source':
-        # Scan for Deposit events on the source chain
+
         print(f"Scanning blocks {start_block_source} to {current_block_source} on source chain")
 
         try:
-            # Fix: Use the correct method to get logs
-            deposit_filter = source_contract.events.Deposit.create_filter(
-                fromBlock=start_block_source,
-                toBlock=current_block_source
-            )
-            deposit_events = deposit_filter.get_all_entries()
+            deposit_events = w3_source.eth.get_logs({
+                'fromBlock': start_block_source,
+                'toBlock': current_block_source,
+                'address': source_address
+            })
 
             print(f"Found {len(deposit_events)} Deposit events")
 
-            # Process each Deposit event
             for event in deposit_events:
-                token = event.args.token
-                recipient = event.args.recipient
-                amount = event.args.amount
+                parsed_event = source_contract.events.Deposit().process_log(event)
+                token = parsed_event.args.token
+                recipient = parsed_event.args.recipient
+                amount = parsed_event.args.amount
 
                 print(f"Found Deposit: Token: {token}, Recipient: {recipient}, Amount: {amount}")
 
-                # Call the wrap function on the destination chain
                 nonce = w3_dest.eth.get_transaction_count(warden_address)
 
-                # Build the transaction
                 wrap_tx = dest_contract.functions.wrap(
                     token,
                     recipient,
@@ -120,14 +110,12 @@ def scan_blocks(chain, contract_info="contract_info.json"):
                     'nonce': nonce,
                 })
 
-                # Sign and send the transaction
+
                 signed_tx = w3_dest.eth.account.sign_transaction(wrap_tx, warden_key)
-                # Fix: Use .raw_transaction instead of .rawTransaction
                 tx_hash = w3_dest.eth.send_raw_transaction(signed_tx.raw_transaction)
 
                 print(f"Sent wrap transaction: {tx_hash.hex()}")
 
-                # Wait for the transaction to be mined
                 receipt = w3_dest.eth.wait_for_transaction_receipt(tx_hash)
                 if receipt.status == 1:
                     print("Wrap transaction succeeded")
@@ -142,27 +130,26 @@ def scan_blocks(chain, contract_info="contract_info.json"):
         print(f"Scanning blocks {start_block_dest} to {current_block_dest} on destination chain")
 
         try:
-            # Fix: Use the correct method to get logs
-            unwrap_filter = dest_contract.events.Unwrap.create_filter(
-                fromBlock=start_block_dest,
-                toBlock=current_block_dest
-            )
-            unwrap_events = unwrap_filter.get_all_entries()
+            unwrap_topic = w3_dest.keccak(text="Unwrap(address,address,uint256)").hex()
+            unwrap_events = w3_dest.eth.get_logs({
+            'fromBlock': start_block_dest,
+            'toBlock': current_block_dest,
+            'address': dest_address,
+            'topics': [unwrap_topic]
+            })
 
             print(f"Found {len(unwrap_events)} Unwrap events")
 
-            # Process each Unwrap event
             for event in unwrap_events:
-                token = event.args.underlying_token
-                recipient = event.args.to  # The recipient is in the 'to' field
-                amount = event.args.amount
+                parsed_event = dest_contract.events.Unwrap().process_log(event)
+                token = parsed_event.args.underlying_token
+                recipient = parsed_event.args.to
+                amount = parsed_event.args.amount
 
                 print(f"Found Unwrap: Token: {token}, Recipient: {recipient}, Amount: {amount}")
 
-                # Call the withdraw function on the source chain
                 nonce = w3_source.eth.get_transaction_count(warden_address)
 
-                # Build the transaction
                 withdraw_tx = source_contract.functions.withdraw(
                     token,
                     recipient,
@@ -176,7 +163,6 @@ def scan_blocks(chain, contract_info="contract_info.json"):
 
                 # Sign and send the transaction
                 signed_tx = w3_source.eth.account.sign_transaction(withdraw_tx, warden_key)
-                # Fix: Use the correct chain (w3_source) and raw_transaction instead of rawTransaction
                 tx_hash = w3_source.eth.send_raw_transaction(signed_tx.raw_transaction)
 
                 print(f"Sent withdraw transaction: {tx_hash.hex()}")
@@ -198,37 +184,32 @@ def register_tokens(contract_info="contract_info.json", token_csv="erc20s.csv"):
     """
     Register tokens on both chains using the token addresses from the CSV file
     """
-    # Load contract information from contract_info.json
     with open(contract_info, 'r') as f:
         info = json.load(f)
     
-    # Connect to both chains
     w3_source = connect_to('source')
     w3_dest = connect_to('destination')
     
-    # Get contract addresses
     source_address = Web3.to_checksum_address(info["source"]["address"])
     dest_address = Web3.to_checksum_address(info["destination"]["address"])
     
     
-    # Initialize contracts
     source_contract = w3_source.eth.contract(
         address=source_address,
-        abi=info["source"]["abi"]  # Use the ABI from contract_info.json
+        abi=info["source"]["abi"]
     )
     
     dest_contract = w3_dest.eth.contract(
         address=dest_address,
-        abi=info["destination"]["abi"]  # Use the ABI from contract_info.json
+        abi=info["destination"]["abi"]
     )
     
-    # Read the token CSV file
     try:
         source_tokens = []
         dest_tokens = []
         
         with open(token_csv, 'r') as f:
-            next(f)  # Skip header
+            next(f)
             for line in f:
                 parts = line.strip().split(',')
                 if len(parts) == 2:
@@ -238,17 +219,14 @@ def register_tokens(contract_info="contract_info.json", token_csv="erc20s.csv"):
                     elif chain.lower() == 'bsc':
                         dest_tokens.append(token_address)
         
-        # Process tokens in pairs
         for i in range(min(len(source_tokens), len(dest_tokens))):
             source_token = source_tokens[i]
             dest_token = dest_tokens[i]
             
-            # Create simple name and symbol for the token
             name = "Wrapped Token"
             symbol = "WTKN"
             
             try:
-                # Register token on source chain
                 print(f"Registering token {source_token} on source chain...")
                 nonce = w3_source.eth.get_transaction_count(warden_address)
                 
@@ -262,13 +240,11 @@ def register_tokens(contract_info="contract_info.json", token_csv="erc20s.csv"):
                 })
                 
                 signed_tx = w3_source.eth.account.sign_transaction(register_tx, warden_key)
-                # Fix: Use .raw_transaction instead of .rawTransaction
                 tx_hash = w3_source.eth.send_raw_transaction(signed_tx.raw_transaction)
                 
                 print(f"Sent register token transaction: {tx_hash.hex()}")
                 receipt = w3_source.eth.wait_for_transaction_receipt(tx_hash)
                 
-                # Create token on destination chain
                 print(f"Creating wrapped token for {source_token} on destination chain...")
                 nonce = w3_dest.eth.get_transaction_count(warden_address)
                 
@@ -284,7 +260,6 @@ def register_tokens(contract_info="contract_info.json", token_csv="erc20s.csv"):
                 })
                 
                 signed_tx = w3_dest.eth.account.sign_transaction(create_tx, warden_key)
-                # Fix: Use .raw_transaction instead of .rawTransaction
                 tx_hash = w3_dest.eth.send_raw_transaction(signed_tx.raw_transaction)
                 
                 print(f"Sent create token transaction: {tx_hash.hex()}")
@@ -292,15 +267,55 @@ def register_tokens(contract_info="contract_info.json", token_csv="erc20s.csv"):
                 
             except Exception as e:
                 print(f"Error registering/creating token {source_token}: {e}")
-                # Continue with the next token
     
     except Exception as e:
         print(f"Error reading token CSV file: {e}")
 
+def create_missing_tokens():
+    contract_info = "contract_info.json"
+    with open(contract_info, 'r') as f:
+        info = json.load(f)
+
+    w3_dest = connect_to("destination")
+    dest_address = Web3.to_checksum_address(info["destination"]["address"])
+    dest_contract = w3_dest.eth.contract(address=dest_address, abi=info["destination"]["abi"])
+
+    tokens_to_create = [
+        "0xc677c31AD31F73A5290f5ef067F8CEF8d301e45c",
+        "0x0773b81e0524447784CcE1F3808fed6AaA156eC8"
+    ]
+
+    name = "Wrapped Token"
+    symbol = "WTKN"
+
+    for token in tokens_to_create:
+        try:
+            nonce = w3_dest.eth.get_transaction_count(warden_address)
+            tx = dest_contract.functions.createToken(
+                Web3.to_checksum_address(token),
+                name,
+                symbol
+            ).build_transaction({
+                'from': warden_address,
+                'gas': 300000,
+                'gasPrice': w3_dest.eth.gas_price,
+                'nonce': nonce,
+            })
+
+            signed_tx = w3_dest.eth.account.sign_transaction(tx, warden_key)
+            tx_hash = w3_dest.eth.send_raw_transaction(signed_tx.raw_transaction)
+            receipt = w3_dest.eth.wait_for_transaction_receipt(tx_hash)
+            print(f"Created token {token}: {tx_hash.hex()}")
+
+        except Exception as e:
+            print(f"Failed to create token {token}: {e}")
+
+
 if __name__ == "__main__":
-    # First register tokens (if needed)
-    register_tokens()
+    # register_tokens()
+    create_missing_tokens()
     
-    # Then scan blocks on both chains
     scan_blocks('source')
     scan_blocks('destination')
+
+
