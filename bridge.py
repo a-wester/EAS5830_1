@@ -36,13 +36,11 @@ def get_contract_info(chain, contract_info):
     return contracts[chain]
 
 
+import time
+
 def scan_blocks(chain, contract_info="contract_info.json"):
     """
-        chain - (string) should be either "source" or "destination"
-        Scan the last 5 blocks of the source and destination chains
-        Look for 'Deposit' events on the source chain and 'Unwrap' events on the destination chain
-        When Deposit events are found on the source chain, call the 'wrap' function on the destination chain
-        When Unwrap events are found on the destination chain, call the 'withdraw' function on the source chain
+        Scan blocks individually to avoid RPC limits
     """
     if chain not in ['source', 'destination']:
         print(f"Invalid chain: {chain}")
@@ -59,10 +57,6 @@ def scan_blocks(chain, contract_info="contract_info.json"):
     # Get contract addresses
     source_address = Web3.to_checksum_address(info["source"]["address"])
     dest_address = Web3.to_checksum_address(info["destination"]["address"])
-
-    # Get warden info
-    warden_address = Web3.to_checksum_address("0x3b178a0a54730C2AAe0b327C77aF2d78F3Dca55B")  # Hardcoded warden address
-    warden_key = "0xc72d903f58f9b5aecfc15ca6916720a88cc8b090e27ce9bb0db52bb0cd05c1d3"  # Hardcoded warden private key
 
     # Initialize contracts
     source_contract = w3_source.eth.contract(
@@ -81,49 +75,53 @@ def scan_blocks(chain, contract_info="contract_info.json"):
 
     # Calculate starting blocks (last 5 blocks)
     start_block_source = max(0, current_block_source - 5)
-    start_block_dest = max(0, current_block_dest - 5)  # Ensure that start_block_dest is defined
+    start_block_dest = max(0, current_block_dest - 5)
 
     if chain == 'source':
         # Scan for Deposit events on the source chain
         print(f"Scanning blocks {start_block_source} to {current_block_source} on source chain")
+        
+        deposit_events = []
+        
+        # Process each block individually to avoid limits
+        for block_number in range(start_block_source, current_block_source + 1):
+            try:
+                # Process one block at a time
+                event_filter = {
+                    'fromBlock': block_number,
+                    'toBlock': block_number,
+                    'address': source_address
+                }
+                
+                logs = w3_source.eth.get_logs(event_filter)
+                
+                for log in logs:
+                    try:
+                        if log['address'].lower() == source_address.lower():
+                            parsed_log = source_contract.events.Deposit().process_log(log)
+                            deposit_events.append(parsed_log)
+                    except Exception as e:
+                        continue
+                
+                # Small delay to avoid rate limiting
+                time.sleep(0.1)
+                
+            except Exception as e:
+                print(f"Error processing block {block_number}: {e}")
+                time.sleep(1)  # Longer delay after an error
+                continue
 
-        try:
-            # Trying a different approach with event filtering
-            deposit_events = []
-            
-            # Alternative method using event filters with explicit parameters
-            event_filter = {
-                'fromBlock': start_block_source,
-                'toBlock': current_block_source,
-                'address': source_address
-            }
-            
-            # Get all logs that match our filter
-            logs = w3_source.eth.get_logs(event_filter)
-            
-            # Process each log
-            for log in logs:
-                # Try to process each log as a Deposit event
-                try:
-                    # Check if this log is for our contract address (redundant but safe)
-                    if log['address'].lower() == source_address.lower():
-                        # Try to decode the log as a Deposit event
-                        parsed_log = source_contract.events.Deposit().process_log(log)
-                        deposit_events.append(parsed_log)
-                except Exception as e:
-                    # This log wasn't a Deposit event, we can ignore it
-                    continue
+        print(f"Found {len(deposit_events)} Deposit events")
 
-            print(f"Found {len(deposit_events)} Deposit events")
+        # Process Deposit events (code remains the same)
+        for event in deposit_events:
+            token = event.args.token
+            recipient = event.args.recipient
+            amount = event.args.amount
 
-            # Process each Deposit event
-            for event in deposit_events:
-                token = event.args.token
-                recipient = event.args.recipient
-                amount = event.args.amount
+            print(f"Found Deposit: Token: {token}, Recipient: {recipient}, Amount: {amount}")
 
-                print(f"Found Deposit: Token: {token}, Recipient: {recipient}, Amount: {amount}")
-
+            try:
                 # Call the wrap function on the destination chain
                 nonce = w3_dest.eth.get_transaction_count(warden_address)
 
@@ -151,47 +149,54 @@ def scan_blocks(chain, contract_info="contract_info.json"):
                     print("Wrap transaction succeeded")
                 else:
                     print("Wrap transaction failed")
-
-        except Exception as e:
-            print(f"Error processing Deposit events: {e}")
+            except Exception as e:
+                print(f"Error processing wrap transaction: {e}")
 
     elif chain == 'destination':
         # Scan for Unwrap events on the destination chain
         print(f"Scanning blocks {start_block_dest} to {current_block_dest} on destination chain")
+        
+        unwrap_events = []
+        
+        # Process each block individually to avoid limits
+        for block_number in range(start_block_dest, current_block_dest + 1):
+            try:
+                # Process one block at a time
+                event_filter = {
+                    'fromBlock': block_number,
+                    'toBlock': block_number,
+                    'address': dest_address
+                }
+                
+                logs = w3_dest.eth.get_logs(event_filter)
+                
+                for log in logs:
+                    try:
+                        if log['address'].lower() == dest_address.lower():
+                            parsed_log = dest_contract.events.Unwrap().process_log(log)
+                            unwrap_events.append(parsed_log)
+                    except Exception as e:
+                        continue
+                
+                # Small delay to avoid rate limiting
+                time.sleep(0.1)
+                
+            except Exception as e:
+                print(f"Error processing block {block_number}: {e}")
+                time.sleep(1)  # Longer delay after an error
+                continue
 
-        try:
-            # Similar approach for destination chain
-            unwrap_events = []
-            
-            # Set up event filter
-            event_filter = {
-                'fromBlock': start_block_dest,
-                'toBlock': current_block_dest,
-                'address': dest_address
-            }
-            
-            # Get logs
-            logs = w3_dest.eth.get_logs(event_filter)
-            
-            # Process logs
-            for log in logs:
-                try:
-                    if log['address'].lower() == dest_address.lower():
-                        parsed_log = dest_contract.events.Unwrap().process_log(log)
-                        unwrap_events.append(parsed_log)
-                except Exception as e:
-                    continue
+        print(f"Found {len(unwrap_events)} Unwrap events")
 
-            print(f"Found {len(unwrap_events)} Unwrap events")
+        # Process Unwrap events (code remains the same)
+        for event in unwrap_events:
+            token = event.args.underlying_token
+            recipient = event.args.to  # The recipient is in the 'to' field
+            amount = event.args.amount
 
-            # Process each Unwrap event
-            for event in unwrap_events:
-                token = event.args.underlying_token
-                recipient = event.args.to  # The recipient is in the 'to' field
-                amount = event.args.amount
+            print(f"Found Unwrap: Token: {token}, Recipient: {recipient}, Amount: {amount}")
 
-                print(f"Found Unwrap: Token: {token}, Recipient: {recipient}, Amount: {amount}")
-
+            try:
                 # Call the withdraw function on the source chain
                 nonce = w3_source.eth.get_transaction_count(warden_address)
 
@@ -219,9 +224,8 @@ def scan_blocks(chain, contract_info="contract_info.json"):
                     print("Withdraw transaction succeeded")
                 else:
                     print("Withdraw transaction failed")
-
-        except Exception as e:
-            print(f"Error processing Unwrap events: {e}")
+            except Exception as e:
+                print(f"Error processing withdraw transaction: {e}")
 
     return 1
 
