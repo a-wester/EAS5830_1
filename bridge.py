@@ -136,7 +136,7 @@ def scan_blocks(chain, contract_info="contract_info.json"):
                     amount
                 ).build_transaction({
                     'from': warden_address,
-                    'gas': 2000000,  # Increased gas limit
+                    'gas': 200000,  # Increased gas limit
                     'gasPrice': w3_dest.eth.gas_price,
                     'nonce': nonce,
                 })
@@ -241,7 +241,7 @@ def register_tokens(contract_info="contract_info.json", token_csv="erc20s.csv"):
                     symbol
                 ).build_transaction({
                     'from': warden_address,
-                    'gas': 2000000,
+                    'gas': 200000,
                     'gasPrice': w3_dest.eth.gas_price,
                     'nonce': nonce,
                 })
@@ -272,7 +272,7 @@ def create_missing_tokens():
     dest_contract = w3_dest.eth.contract(address=dest_address, abi=info["destination"]["abi"])
 
     tokens_to_create = [
-        #"0xc677c31AD31F73A5290f5ef067F8CEF8d301e45c",
+        "0xc677c31AD31F73A5290f5ef067F8CEF8d301e45c",
         "0x0773b81e0524447784CcE1F3808fed6AaA156eC8"
     ]
 
@@ -292,7 +292,7 @@ def create_missing_tokens():
             symbol
         ).build_transaction({
             'from': warden_address,
-            'gas': 2000000,
+            'gas': 3000000,
             'gasPrice': w3_dest.eth.gas_price,
             'nonce': nonce,
         })
@@ -319,7 +319,7 @@ def create_missing_tokens():
             symbol
         ).build_transaction({
             'from': warden_address,
-            'gas': 2000000,
+            'gas': 3000000,
             'gasPrice': w3_dest.eth.gas_price,
             'nonce': nonce,
         })
@@ -334,10 +334,10 @@ def create_missing_tokens():
 
 if __name__ == "__main__":
     # register_tokens()
-    # create_missing_tokens()
+    #create_missing_tokens()
     
     # Add delay between operations
-    time.sleep(2)
+    # time.sleep(2)
     
     scan_blocks('source')
     
