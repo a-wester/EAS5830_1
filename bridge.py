@@ -287,7 +287,7 @@ def register_tokens(contract_info="contract_info.json", token_csv="erc20s.csv"):
 
 if __name__ == "__main__":
     # First register tokens (if needed)
-    # register_tokens()
+    register_tokens()
     
     # Then scan blocks on both chains
     scan_blocks('source')
