@@ -189,12 +189,16 @@ def scan_blocks(chain, contract_info="contract_info.json"):
                     unwrap_topic = w3_dest.keccak(text="Unwrap(address,address,uint256)").hex()
                     
                     # Get logs for a single block with minimal details
-                    unwrap_events = w3_dest.eth.get_logs({
-                        'fromBlock': block_num,
-                        'toBlock': block_num,
-                        'address': dest_address,
-                        'topics': [unwrap_topic]
-                    })
+                    unwrap_events = retry_rpc_call(
+                        w3_dest.eth.get_logs,
+                        {
+                            'fromBlock': start_block_dest,
+                            'toBlock': current_block_dest,
+                            'address': dest_address,
+                            'topics': [unwrap_topic]
+                        }
+                    )
+
                     
                     print(f"Found {len(unwrap_events)} Unwrap events in block {block_num}")
                     
