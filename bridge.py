@@ -179,87 +179,73 @@ def scan_blocks(chain, contract_info="contract_info.json"):
         print(f"Scanning blocks {start_block_dest} to {current_block_dest} on destination chain")
         
         # For destination chain, we need a more direct approach due to rate limits
+        time.sleep(3)
         try:
-            # Just try to get the most recent blocks individually
-            for block_num in range(current_block_dest, start_block_dest - 1, -1):
-                try:
-                    # Add significant delay between requests to avoid rate limits
-                    time.sleep(10)
-                    
-                    unwrap_topic = w3_dest.keccak(text="Unwrap(address,address,uint256)").hex()
-                    
-                    # Get logs for a single block with minimal details
-                    unwrap_events = retry_rpc_call(
-                        w3_dest.eth.get_logs,
-                        {
-                            'fromBlock': start_block_dest,
-                            'toBlock': current_block_dest,
-                            'address': dest_address,
-                            'topics': [unwrap_topic]
-                        }
-                    )
+            print(f"Scanning unwraps from blocks {start_block_dest} to {current_block_dest} on destination chain")
+            unwrap_topic = w3_dest.keccak(text="Unwrap(address,address,uint256)").hex()
 
+            unwrap_events = retry_rpc_call(
+                w3_dest.eth.get_logs,
+                {
+                    'fromBlock': start_block_dest,
+                    'toBlock': current_block_dest,
+                    'address': dest_address,
+                    'topics': [unwrap_topic]
+                }
+            )
+
+
+            print(f"Found {len(unwrap_events)} Unwrap events")
+            for event in unwrap_events: # your unwrap processing logic...
+                try:
+                    parsed_event = dest_contract.events.Unwrap().process_log(event)
+                    token = parsed_event.args.underlying_token
+                    recipient = parsed_event.args.to
+                    amount = parsed_event.args.amount
                     
-                    print(f"Found {len(unwrap_events)} Unwrap events in block {block_num}")
+                    print(f"Found Unwrap: Token: {token}, Recipient: {recipient}, Amount: {amount}")
                     
-                    for event in unwrap_events:
+                    # Get a fresh nonce with retry logic
+                    max_nonce_retries = 3
+                    for nonce_retry in range(max_nonce_retries):
                         try:
-                            parsed_event = dest_contract.events.Unwrap().process_log(event)
-                            token = parsed_event.args.underlying_token
-                            recipient = parsed_event.args.to
-                            amount = parsed_event.args.amount
+                            nonce = w3_source.eth.get_transaction_count(warden_address)
                             
-                            print(f"Found Unwrap: Token: {token}, Recipient: {recipient}, Amount: {amount}")
+                            withdraw_tx = source_contract.functions.withdraw(
+                                token,
+                                recipient,
+                                amount
+                            ).build_transaction({
+                                'from': warden_address,
+                                'gas': 200000,
+                                'gasPrice': w3_source.eth.gas_price * 2,  # Double gas price for faster processing
+                                'nonce': nonce + nonce_retry,  # Increment nonce on retries
+                            })
                             
-                            # Get a fresh nonce with retry logic
-                            max_nonce_retries = 3
-                            for nonce_retry in range(max_nonce_retries):
-                                try:
-                                    nonce = w3_source.eth.get_transaction_count(warden_address)
-                                    
-                                    withdraw_tx = source_contract.functions.withdraw(
-                                        token,
-                                        recipient,
-                                        amount
-                                    ).build_transaction({
-                                        'from': warden_address,
-                                        'gas': 200000,
-                                        'gasPrice': w3_source.eth.gas_price * 2,  # Double gas price for faster processing
-                                        'nonce': nonce + nonce_retry,  # Increment nonce on retries
-                                    })
-                                    
-                                    signed_tx = w3_source.eth.account.sign_transaction(withdraw_tx, warden_key)
-                                    tx_hash = w3_source.eth.send_raw_transaction(signed_tx.raw_transaction)
-                                    
-                                    print(f"Sent withdraw transaction: {tx_hash.hex()}")
-                                    
-                                    receipt = w3_source.eth.wait_for_transaction_receipt(tx_hash)
-                                    if receipt.status == 1:
-                                        print("Withdraw transaction succeeded")
-                                    else:
-                                        print("Withdraw transaction failed")
-                                    
-                                    # If successful, break out of retry loop
-                                    break
-                                        
-                                except Exception as e:
-                                    error_msg = str(e)
-                                    if 'nonce too low' in error_msg and nonce_retry < max_nonce_retries - 1:
-                                        print(f"Nonce too low. Retrying with incremented nonce {nonce + nonce_retry + 1}")
-                                        continue
-                                    else:
-                                        raise  # Re-raise other exceptions or if we've exhausted retries
-                                    
+                            signed_tx = w3_source.eth.account.sign_transaction(withdraw_tx, warden_key)
+                            tx_hash = w3_source.eth.send_raw_transaction(signed_tx.raw_transaction)
+                            
+                            print(f"Sent withdraw transaction: {tx_hash.hex()}")
+                            
+                            receipt = w3_source.eth.wait_for_transaction_receipt(tx_hash)
+                            if receipt.status == 1:
+                                print("Withdraw transaction succeeded")
+                            else:
+                                print("Withdraw transaction failed")
+                            
+                            # If successful, break out of retry loop
+                            break
+                                
                         except Exception as e:
-                            print(f"Error processing unwrap event: {e}")
-                            continue
-                
+                            error_msg = str(e)
+                            if 'nonce too low' in error_msg and nonce_retry < max_nonce_retries - 1:
+                                print(f"Nonce too low. Retrying with incremented nonce {nonce + nonce_retry + 1}")
+                                continue
+                            else:
+                                raise  # Re-raise other exceptions or if we've exhausted retries
+                            
                 except Exception as e:
-                    print(f"Error processing block {block_num}: {e}")
-                    # If we hit a rate limit, wait longer before continuing
-                    if 'limit exceeded' in str(e) or 'rate limit' in str(e):
-                        print(f"Rate limit hit on block {block_num}, waiting 5 seconds...")
-                        time.sleep(10)
+                    print(f"Error processing unwrap event: {e}")
                     continue
                     
         except Exception as outer_e:
