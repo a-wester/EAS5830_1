@@ -198,7 +198,7 @@ def register_tokens(contract_info="contract_info.json", token_csv="erc20s.csv"):
     """
     Register tokens on both chains using the token addresses from the CSV file
     """
-    # Load contract information
+    # Load contract information from contract_info.json
     with open(contract_info, 'r') as f:
         info = json.load(f)
     
@@ -217,21 +217,35 @@ def register_tokens(contract_info="contract_info.json", token_csv="erc20s.csv"):
     # Initialize contracts
     source_contract = w3_source.eth.contract(
         address=source_address,
-        abi=info["source"]["abi"]
+        abi=info["source"]["abi"]  # Use the ABI from contract_info.json
     )
     
     dest_contract = w3_dest.eth.contract(
         address=dest_address,
-        abi=info["destination"]["abi"]
+        abi=info["destination"]["abi"]  # Use the ABI from contract_info.json
     )
-    
-    # Rest of the function remains the same...
     
     # Read the token CSV file
     try:
-        df = pd.read_csv(token_csv, header=None)
-        for _, row in df.iterrows():
-            source_token = row[0]
+        source_tokens = []
+        dest_tokens = []
+        
+        with open(token_csv, 'r') as f:
+            next(f)  # Skip header
+            for line in f:
+                parts = line.strip().split(',')
+                if len(parts) == 2:
+                    chain, token_address = parts
+                    if chain.lower() == 'avax':
+                        source_tokens.append(token_address)
+                    elif chain.lower() == 'bsc':
+                        dest_tokens.append(token_address)
+        
+        # Process tokens in pairs
+        for i in range(min(len(source_tokens), len(dest_tokens))):
+            source_token = source_tokens[i]
+            dest_token = dest_tokens[i]
+            
             # Create simple name and symbol for the token
             name = "Wrapped Token"
             symbol = "WTKN"
@@ -283,12 +297,3 @@ def register_tokens(contract_info="contract_info.json", token_csv="erc20s.csv"):
     
     except Exception as e:
         print(f"Error reading token CSV file: {e}")
-
-
-if __name__ == "__main__":
-    # First register tokens (if needed)
-    register_tokens()
-    
-    # Then scan blocks on both chains
-    scan_blocks('source')
-    scan_blocks('destination')
