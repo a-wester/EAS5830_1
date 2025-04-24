@@ -101,7 +101,7 @@ def scan_blocks(chain, contract_info="contract_info.json"):
     current_block_dest = w3_dest.eth.block_number
 
     start_block_source = max(0, current_block_source - 5)
-    start_block_dest = max(0, current_block_dest - 2)
+    start_block_dest = max(0, current_block_dest - 10)
 
     if chain == 'source':
         print(f"Scanning blocks {start_block_source} to {current_block_source} on source chain")
