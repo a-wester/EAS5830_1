@@ -60,6 +60,80 @@ def retry_rpc_call(func, *args, max_retries=5, **kwargs):
             time.sleep(wait_time)
 
 
+def send_transaction_with_retry(w3, contract_func, warden_address, warden_key, gas_limit=100000, max_retries=5):
+    """
+    Helper function to send a transaction with proper retry logic for common errors
+    """
+    last_error = None
+    initial_nonce = w3.eth.get_transaction_count(warden_address)
+    initial_gas_price = w3.eth.gas_price
+    
+    # Calculate a base gas price based on available balance
+    available_balance = w3.eth.get_balance(warden_address)
+    base_gas_price = min(initial_gas_price, available_balance // (gas_limit * 2))
+    
+    for attempt in range(max_retries):
+        try:
+            # For each retry, get a fresh nonce and increase gas price
+            current_nonce = initial_nonce + attempt
+            current_gas_price = int(base_gas_price * (1.2 ** attempt))  # Increase by 20% each retry
+            
+            # Make sure gas price doesn't exceed what we can afford
+            max_affordable_gas_price = available_balance // gas_limit
+            current_gas_price = min(current_gas_price, max_affordable_gas_price)
+            
+            tx = contract_func.build_transaction({
+                'from': warden_address,
+                'gas': gas_limit,
+                'gasPrice': current_gas_price,
+                'nonce': current_nonce,
+            })
+            
+            signed_tx = w3.eth.account.sign_transaction(tx, warden_key)
+            tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
+            
+            print(f"Transaction sent with gas price {current_gas_price} wei. Hash: {tx_hash.hex()}")
+            
+            # Wait for receipt
+            receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
+            
+            if receipt.status == 1:
+                print("Transaction succeeded!")
+                return receipt
+            else:
+                print("Transaction failed on-chain!")
+                last_error = Exception("Transaction failed with status 0")
+                continue
+                
+        except Exception as e:
+            error_msg = str(e)
+            print(f"Attempt {attempt+1}/{max_retries} failed: {error_msg}")
+            
+            last_error = e
+            
+            # Handle specific errors
+            if 'nonce too low' in error_msg:
+                # Get a fresh nonce for next attempt
+                initial_nonce = w3.eth.get_transaction_count(warden_address)
+                print(f"Updating nonce to {initial_nonce}")
+            elif 'replacement transaction underpriced' in error_msg:
+                # Significantly increase gas price for next attempt
+                base_gas_price = int(base_gas_price * 1.5)
+                print(f"Increasing base gas price to {base_gas_price}")
+            elif 'insufficient funds' in error_msg:
+                # Reduce gas price even more
+                base_gas_price = int(base_gas_price * 0.7)
+                print(f"Reducing base gas price to {base_gas_price}")
+            
+            # Wait before retry with exponential backoff
+            wait_time = (2 ** attempt) + random.uniform(0, 1)
+            print(f"Waiting {wait_time:.2f} seconds before retry...")
+            time.sleep(wait_time)
+    
+    # If we reach here, all retries failed
+    raise last_error or Exception("Transaction failed after all retry attempts")
+
+
 def scan_blocks(chain, contract_info="contract_info.json"):
     """
         chain - (string) should be either "source" or "destination"
@@ -121,86 +195,24 @@ def scan_blocks(chain, contract_info="contract_info.json"):
 
                     print(f"Found Deposit: Token: {token}, Recipient: {recipient}, Amount: {amount}")
                     
-                    nonce = w3_dest.eth.get_transaction_count(warden_address)
-                    
-                    max_nonce_retries = 3
-                    for nonce_retry in range(max_nonce_retries):
-                        try:
-                            # Get current gas price
-                            gas_price = w3_dest.eth.gas_price
+                    # Use the improved transaction sending function
+                    try:
+                        receipt = send_transaction_with_retry(
+                            w3_dest,
+                            dest_contract.functions.wrap(token, recipient, amount),
+                            warden_address,
+                            warden_key,
+                            gas_limit=100000,
+                            max_retries=5
+                        )
+                        
+                        if receipt and receipt.status == 1:
+                            print(f"Successfully wrapped tokens. Transaction hash: {receipt.transactionHash.hex()}")
+                        else:
+                            print("Wrap transaction failed")
                             
-                            # FIX: Use much lower gas to avoid insufficient funds error
-                            # Calculate a gas price that will work with the available balance
-                            available_balance = w3_dest.eth.get_balance(warden_address)
-                            max_gas_price = available_balance // 100000  # Leave room for the transaction
-                            
-                            # Use the minimum of the current gas price or the max we can afford
-                            gas_price = min(gas_price, max_gas_price)
-                            
-                            wrap_tx = dest_contract.functions.wrap(
-                                token,
-                                recipient,
-                                amount
-                            ).build_transaction({
-                                'from': warden_address,
-                                'gas': 100000,  # Lower gas limit
-                                'gasPrice': gas_price,
-                                'nonce': nonce + nonce_retry,
-                            })
-
-                            signed_tx = w3_dest.eth.account.sign_transaction(wrap_tx, warden_key)
-                            tx_hash = w3_dest.eth.send_raw_transaction(signed_tx.raw_transaction)
-
-                            print(f"Sent wrap transaction: {tx_hash.hex()}")
-
-                            receipt = w3_dest.eth.wait_for_transaction_receipt(tx_hash)
-                            if receipt.status == 1:
-                                print("Wrap transaction succeeded")
-                            else:
-                                print("Wrap transaction failed")
-                            
-                            # If successful, break out of retry loop
-                            break
-                            
-                        except Exception as e:
-                            error_msg = str(e)
-                            if 'nonce too low' in error_msg and nonce_retry < max_nonce_retries - 1:
-                                print(f"Nonce too low. Retrying with incremented nonce {nonce + nonce_retry + 1}")
-                                continue
-                            elif 'insufficient funds' in error_msg:
-                                # Try with even lower gas price
-                                print("Insufficient funds, trying with lower gas price...")
-                                try:
-                                    available_balance = w3_dest.eth.get_balance(warden_address)
-                                    gas_price = available_balance // 200000  # Cut gas price in half
-                                    
-                                    wrap_tx = dest_contract.functions.wrap(
-                                        token,
-                                        recipient,
-                                        amount
-                                    ).build_transaction({
-                                        'from': warden_address,
-                                        'gas': 100000,
-                                        'gasPrice': gas_price,
-                                        'nonce': nonce + nonce_retry,
-                                    })
-    
-                                    signed_tx = w3_dest.eth.account.sign_transaction(wrap_tx, warden_key)
-                                    tx_hash = w3_dest.eth.send_raw_transaction(signed_tx.raw_transaction)
-                                    
-                                    print(f"Sent wrap transaction with lower gas: {tx_hash.hex()}")
-                                    
-                                    receipt = w3_dest.eth.wait_for_transaction_receipt(tx_hash)
-                                    if receipt.status == 1:
-                                        print("Wrap transaction succeeded")
-                                    else:
-                                        print("Wrap transaction failed")
-                                    
-                                    break
-                                except Exception as inner_e:
-                                    print(f"Error with lower gas price too: {inner_e}")
-                            else:
-                                raise
+                    except Exception as tx_error:
+                        print(f"Failed to send wrap transaction after all retries: {tx_error}")
                     
                 except Exception as e:
                     print(f"Error processing deposit event: {e}")
@@ -214,7 +226,7 @@ def scan_blocks(chain, contract_info="contract_info.json"):
         
         time.sleep(3)  # Brief delay before scanning
         
-        # FIX: Scan blocks one by one to avoid rate limits
+        # Process blocks one by one to avoid rate limits
         found_any_unwrap = False
         for block_num in range(start_block_dest, current_block_dest + 1):
             try:
@@ -243,73 +255,24 @@ def scan_blocks(chain, contract_info="contract_info.json"):
                                 
                                 print(f"Found Unwrap: Token: {token}, Recipient: {recipient}, Amount: {amount}")
                                 
-                                # Get a fresh nonce with retry logic
-                                max_nonce_retries = 3
-                                for nonce_retry in range(max_nonce_retries):
-                                    try:
-                                        nonce = w3_source.eth.get_transaction_count(warden_address)
-                                        
-                                        # FIX: Calculate appropriate gas price based on available balance
-                                        available_balance = w3_source.eth.get_balance(warden_address)
-                                        gas_price = min(w3_source.eth.gas_price, available_balance // 150000)
-                                        
-                                        withdraw_tx = source_contract.functions.withdraw(
-                                            token,
-                                            recipient,
-                                            amount
-                                        ).build_transaction({
-                                            'from': warden_address,
-                                            'gas': 100000,  # Lower gas
-                                            'gasPrice': gas_price,
-                                            'nonce': nonce + nonce_retry,
-                                        })
-                                        
-                                        signed_tx = w3_source.eth.account.sign_transaction(withdraw_tx, warden_key)
-                                        tx_hash = w3_source.eth.send_raw_transaction(signed_tx.raw_transaction)
-                                        
-                                        print(f"Sent withdraw transaction: {tx_hash.hex()}")
-                                        
-                                        receipt = w3_source.eth.wait_for_transaction_receipt(tx_hash)
-                                        if receipt.status == 1:
-                                            print("Withdraw transaction succeeded")
-                                        else:
-                                            print("Withdraw transaction failed")
-                                        
-                                        # If successful, break out of retry loop
-                                        break
+                                # Use the improved transaction sending function
+                                try:
+                                    receipt = send_transaction_with_retry(
+                                        w3_source,
+                                        source_contract.functions.withdraw(token, recipient, amount),
+                                        warden_address,
+                                        warden_key,
+                                        gas_limit=100000,
+                                        max_retries=5
+                                    )
                                     
-                                    except Exception as e:
-                                        error_msg = str(e)
-                                        if 'nonce too low' in error_msg and nonce_retry < max_nonce_retries - 1:
-                                            print(f"Nonce too low. Retrying with incremented nonce {nonce + nonce_retry + 1}")
-                                            continue
-                                        elif 'insufficient funds' in error_msg:
-                                            # Try with even lower gas price
-                                            try:
-                                                gas_price = available_balance // 300000  # Very low gas price
-                                                
-                                                withdraw_tx = source_contract.functions.withdraw(
-                                                    token,
-                                                    recipient,
-                                                    amount
-                                                ).build_transaction({
-                                                    'from': warden_address,
-                                                    'gas': 100000,
-                                                    'gasPrice': gas_price,
-                                                    'nonce': nonce + nonce_retry,
-                                                })
-                                                
-                                                signed_tx = w3_source.eth.account.sign_transaction(withdraw_tx, warden_key)
-                                                tx_hash = w3_source.eth.send_raw_transaction(signed_tx.raw_transaction)
-                                                
-                                                print(f"Sent withdraw transaction with lower gas: {tx_hash.hex()}")
-                                                
-                                                receipt = w3_source.eth.wait_for_transaction_receipt(tx_hash)
-                                                break
-                                            except Exception as inner_e:
-                                                print(f"Error with lower gas price too: {inner_e}")
-                                        else:
-                                            raise
+                                    if receipt and receipt.status == 1:
+                                        print(f"Successfully withdrew tokens. Transaction hash: {receipt.transactionHash.hex()}")
+                                    else:
+                                        print("Withdraw transaction failed")
+                                        
+                                except Exception as tx_error:
+                                    print(f"Failed to send withdraw transaction after all retries: {tx_error}")
                                 
                             except Exception as e:
                                 print(f"Error processing unwrap event: {e}")
@@ -348,7 +311,7 @@ def scan_blocks(chain, contract_info="contract_info.json"):
                 
                 print(f"Found {len(unwrap_events)} Unwrap events in final attempt")
                 
-                # Process events (same logic as above)
+                # Process events
                 for event in unwrap_events:
                     try:
                         parsed_event = dest_contract.events.Unwrap().process_log(event)
@@ -358,34 +321,24 @@ def scan_blocks(chain, contract_info="contract_info.json"):
                         
                         print(f"Found Unwrap: Token: {token}, Recipient: {recipient}, Amount: {amount}")
                         
-                        # Calculate appropriate gas price
-                        available_balance = w3_source.eth.get_balance(warden_address)
-                        gas_price = min(w3_source.eth.gas_price, available_balance // 150000)
-                        
-                        # Process the withdraw
-                        nonce = w3_source.eth.get_transaction_count(warden_address)
-                        
-                        withdraw_tx = source_contract.functions.withdraw(
-                            token,
-                            recipient,
-                            amount
-                        ).build_transaction({
-                            'from': warden_address,
-                            'gas': 100000,
-                            'gasPrice': gas_price,
-                            'nonce': nonce,
-                        })
-                        
-                        signed_tx = w3_source.eth.account.sign_transaction(withdraw_tx, warden_key)
-                        tx_hash = w3_source.eth.send_raw_transaction(signed_tx.raw_transaction)
-                        
-                        print(f"Sent withdraw transaction: {tx_hash.hex()}")
-                        
-                        receipt = w3_source.eth.wait_for_transaction_receipt(tx_hash)
-                        if receipt.status == 1:
-                            print("Withdraw transaction succeeded")
-                        else:
-                            print("Withdraw transaction failed")
+                        # Use the improved transaction sending function
+                        try:
+                            receipt = send_transaction_with_retry(
+                                w3_source,
+                                source_contract.functions.withdraw(token, recipient, amount),
+                                warden_address,
+                                warden_key,
+                                gas_limit=100000,
+                                max_retries=5
+                            )
+                            
+                            if receipt and receipt.status == 1:
+                                print(f"Successfully withdrew tokens. Transaction hash: {receipt.transactionHash.hex()}")
+                            else:
+                                print("Withdraw transaction failed")
+                                
+                        except Exception as tx_error:
+                            print(f"Failed to send withdraw transaction after all retries: {tx_error}")
                         
                     except Exception as e:
                         print(f"Error processing unwrap event in fallback: {e}")
@@ -445,44 +398,36 @@ def register_tokens(contract_info="contract_info.json", token_csv="erc20s.csv"):
             
             try:
                 print(f"Registering token {source_token} on source chain...")
-                # Get fresh nonce for source chain transaction
-                nonce = w3_source.eth.get_transaction_count(warden_address)
+                # Use our improved transaction sending function
+                receipt = send_transaction_with_retry(
+                    w3_source,
+                    source_contract.functions.registerToken(Web3.to_checksum_address(source_token)),
+                    warden_address,
+                    warden_key,
+                    gas_limit=200000,
+                    max_retries=3
+                )
                 
-                register_tx = source_contract.functions.registerToken(
-                    Web3.to_checksum_address(source_token)
-                ).build_transaction({
-                    'from': warden_address,
-                    'gas': 200000, 
-                    'gasPrice': w3_source.eth.gas_price,
-                    'nonce': nonce,
-                })
-                
-                signed_tx = w3_source.eth.account.sign_transaction(register_tx, warden_key)
-                tx_hash = w3_source.eth.send_raw_transaction(signed_tx.raw_transaction)
-                
-                print(f"Sent register token transaction: {tx_hash.hex()}")
-                receipt = w3_source.eth.wait_for_transaction_receipt(tx_hash)
+                if receipt and receipt.status == 1:
+                    print(f"Successfully registered token on source chain. Transaction hash: {receipt.transactionHash.hex()}")
+                else:
+                    print("Registration transaction failed")
                 
                 print(f"Creating wrapped token for {source_token} on destination chain...")
-                # Get fresh nonce for destination chain transaction
-                nonce = w3_dest.eth.get_transaction_count(warden_address)
+                # Use our improved transaction sending function
+                receipt = send_transaction_with_retry(
+                    w3_dest,
+                    dest_contract.functions.createToken(Web3.to_checksum_address(source_token), name, symbol),
+                    warden_address,
+                    warden_key,
+                    gas_limit=200000,
+                    max_retries=3
+                )
                 
-                create_tx = dest_contract.functions.createToken(
-                    Web3.to_checksum_address(source_token),
-                    name,
-                    symbol
-                ).build_transaction({
-                    'from': warden_address,
-                    'gas': 200000,
-                    'gasPrice': w3_dest.eth.gas_price,
-                    'nonce': nonce,
-                })
-                
-                signed_tx = w3_dest.eth.account.sign_transaction(create_tx, warden_key)
-                tx_hash = w3_dest.eth.send_raw_transaction(signed_tx.raw_transaction)
-                
-                print(f"Sent create token transaction: {tx_hash.hex()}")
-                receipt = w3_dest.eth.wait_for_transaction_receipt(tx_hash)
+                if receipt and receipt.status == 1:
+                    print(f"Successfully created token on destination chain. Transaction hash: {receipt.transactionHash.hex()}")
+                else:
+                    print("Create token transaction failed")
                 
                 # Add a delay between token registrations to avoid rate limiting
                 time.sleep(10)
@@ -512,64 +457,32 @@ def create_missing_tokens():
     symbol = "WTKN"
 
     # Create tokens one at a time with proper error handling
-    # First token
-    try:
-        # Get the current nonce
-        nonce = w3_dest.eth.get_transaction_count(warden_address)
-        print(f"Creating token {tokens_to_create[0]} with nonce {nonce}")
-        
-        # FIX: Calculate appropriate gas price based on balance
-        available_balance = w3_dest.eth.get_balance(warden_address)
-        gas_price = min(w3_dest.eth.gas_price, available_balance // 150000)
-        
-        tx = dest_contract.functions.createToken(
-            Web3.to_checksum_address(tokens_to_create[0]),
-            name,
-            symbol
-        ).build_transaction({
-            'from': warden_address,
-            'gas': 200000,
-            'gasPrice': gas_price,
-            'nonce': nonce,
-        })
-
-        signed_tx = w3_dest.eth.account.sign_transaction(tx, warden_key)
-        tx_hash = w3_dest.eth.send_raw_transaction(signed_tx.raw_transaction)
-        receipt = w3_dest.eth.wait_for_transaction_receipt(tx_hash)
-        print(f"Created token {tokens_to_create[0]}: {tx_hash.hex()}")
-    except Exception as e:
-        print(f"Failed to create token {tokens_to_create[0]}: {e}")
-    
-    # Always wait between transactions
-    time.sleep(10)
-    
-    # Second token (with fresh nonce)
-    try:
-        # Get a new nonce - this is crucial!
-        nonce = w3_dest.eth.get_transaction_count(warden_address)
-        print(f"Creating token {tokens_to_create[1]} with nonce {nonce}")
-        
-        # FIX: Calculate appropriate gas price based on balance
-        available_balance = w3_dest.eth.get_balance(warden_address)
-        gas_price = min(w3_dest.eth.gas_price, available_balance // 150000)
-        
-        tx = dest_contract.functions.createToken(
-            Web3.to_checksum_address(tokens_to_create[1]),
-            name,
-            symbol
-        ).build_transaction({
-            'from': warden_address,
-            'gas': 200000,
-            'gasPrice': gas_price,
-            'nonce': nonce,
-        })
-
-        signed_tx = w3_dest.eth.account.sign_transaction(tx, warden_key)
-        tx_hash = w3_dest.eth.send_raw_transaction(signed_tx.raw_transaction)
-        receipt = w3_dest.eth.wait_for_transaction_receipt(tx_hash)
-        print(f"Created token {tokens_to_create[1]}: {tx_hash.hex()}")
-    except Exception as e:
-        print(f"Failed to create token {tokens_to_create[1]}: {e}")
+    for i, token in enumerate(tokens_to_create):
+        try:
+            print(f"Creating token {token}")
+            
+            # Use our improved transaction sending function
+            receipt = send_transaction_with_retry(
+                w3_dest,
+                dest_contract.functions.createToken(Web3.to_checksum_address(token), name, symbol),
+                warden_address,
+                warden_key,
+                gas_limit=200000,
+                max_retries=3
+            )
+            
+            if receipt and receipt.status == 1:
+                print(f"Successfully created token {token}. Transaction hash: {receipt.transactionHash.hex()}")
+            else:
+                print(f"Failed to create token {token}")
+                
+            # Always wait between transactions
+            if i < len(tokens_to_create) - 1:  # Don't wait after the last token
+                time.sleep(10)
+                
+        except Exception as e:
+            print(f"Failed to create token {token}: {e}")
+            time.sleep(10)  # Wait before trying the next token
 
 
 if __name__ == "__main__":
