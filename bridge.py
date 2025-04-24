@@ -107,12 +107,10 @@ def scan_blocks(chain, contract_info="contract_info.json"):
         print(f"Scanning blocks {start_block_source} to {current_block_source} on source chain")
 
         try:
-            # Use create_filter approach from Bridge IV instead of get_logs
-            deposit_filter = source_contract.events.Deposit.createFilter(
-                from_block=start_block_source,
-                to_block=current_block_source
-            )
-            deposit_events = deposit_filter.get_all_entries()
+            # Use create_filter approach exactly as in Bridge IV
+            arg_filter = {}
+            event_filter = source_contract.events.Deposit.create_filter(from_block=start_block_source, to_block=current_block_source, argument_filters=arg_filter)
+            deposit_events = event_filter.get_all_entries()
             
             print(f"Found {len(deposit_events)} Deposit events")
 
@@ -176,12 +174,10 @@ def scan_blocks(chain, contract_info="contract_info.json"):
         print(f"Scanning blocks {start_block_dest} to {current_block_dest} on destination chain")
         
         try:
-            # Use create_filter approach from Bridge IV instead of get_logs
-            unwrap_filter = dest_contract.events.Unwrap.createFilter(
-                from_block=start_block_dest,
-                to_block=current_block_dest
-            )
-            unwrap_events = unwrap_filter.get_all_entries()
+            # Use create_filter approach exactly as in Bridge IV
+            arg_filter = {}
+            event_filter = dest_contract.events.Unwrap.create_filter(from_block=start_block_dest, to_block=current_block_dest, argument_filters=arg_filter)
+            unwrap_events = event_filter.get_all_entries()
             
             print(f"Found {len(unwrap_events)} Unwrap events")
             
