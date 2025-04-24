@@ -107,24 +107,21 @@ def scan_blocks(chain, contract_info="contract_info.json"):
         print(f"Scanning blocks {start_block_source} to {current_block_source} on source chain")
 
         try:
-            # Use retry wrapper for RPC call
-            deposit_events = retry_rpc_call(
-                w3_source.eth.get_logs,
-                {
-                    'fromBlock': start_block_source,
-                    'toBlock': current_block_source,
-                    'address': source_address
-                }
+            # Use create_filter approach from Bridge IV instead of get_logs
+            deposit_filter = source_contract.events.Deposit.create_filter(
+                fromBlock=start_block_source,
+                toBlock=current_block_source
             )
-
+            deposit_events = deposit_filter.get_all_entries()
+            
             print(f"Found {len(deposit_events)} Deposit events")
 
             for event in deposit_events:
                 try:
-                    parsed_event = source_contract.events.Deposit().process_log(event)
-                    token = parsed_event.args.token
-                    recipient = parsed_event.args.recipient
-                    amount = parsed_event.args.amount
+                    # Extract event args directly
+                    token = event.args.token
+                    recipient = event.args.recipient
+                    amount = event.args.amount
 
                     print(f"Found Deposit: Token: {token}, Recipient: {recipient}, Amount: {amount}")
 
@@ -178,30 +175,22 @@ def scan_blocks(chain, contract_info="contract_info.json"):
     elif chain == 'destination':
         print(f"Scanning blocks {start_block_dest} to {current_block_dest} on destination chain")
         
-        # for destination chain, more direct approach due to rate limits
-        time.sleep(3)
         try:
-            print(f"Scanning unwraps from blocks {start_block_dest} to {current_block_dest} on destination chain")
-            unwrap_topic = w3_dest.keccak(text="Unwrap(address,address,uint256)").hex()
-
-            unwrap_events = retry_rpc_call(
-                w3_dest.eth.get_logs,
-                {
-                    'fromBlock': start_block_dest,
-                    'toBlock': current_block_dest,
-                    'address': dest_address,
-                    'topics': [unwrap_topic]
-                }
+            # Use create_filter approach from Bridge IV instead of get_logs
+            unwrap_filter = dest_contract.events.Unwrap.create_filter(
+                fromBlock=start_block_dest,
+                toBlock=current_block_dest
             )
-
-
+            unwrap_events = unwrap_filter.get_all_entries()
+            
             print(f"Found {len(unwrap_events)} Unwrap events")
-            for event in unwrap_events: # unwrap processing logic...
+            
+            for event in unwrap_events:
                 try:
-                    parsed_event = dest_contract.events.Unwrap().process_log(event)
-                    token = parsed_event.args.underlying_token
-                    recipient = parsed_event.args.to
-                    amount = parsed_event.args.amount
+                    # Extract event args directly
+                    token = event.args.underlying_token
+                    recipient = event.args.to
+                    amount = event.args.amount
                     
                     print(f"Found Unwrap: Token: {token}, Recipient: {recipient}, Amount: {amount}")
                     
@@ -247,60 +236,9 @@ def scan_blocks(chain, contract_info="contract_info.json"):
                 except Exception as e:
                     print(f"Error processing unwrap event: {e}")
                     continue
-                    
-        except Exception as outer_e:
-            print(f"Error scanning destination chain: {outer_e}")
-            
-            # As a last resort, try to directly check blocks where unwrap events are most likely
-            try:
-                print("Trying direct approach for most recent block...")
-                last_block = current_block_dest - 2  # Often unwrap events are 2 blocks before current
-                
-                time.sleep(10)  # Significant delay to avoid rate limits
-                
-                unwrap_topic = w3_dest.keccak(text="Unwrap(address,address,uint256)").hex()
-                unwrap_events = w3_dest.eth.get_logs({
-                    'fromBlock': last_block,
-                    'toBlock': last_block,
-                    'address': dest_address,
-                    'topics': [unwrap_topic]
-                })
-                
-                for event in unwrap_events:
-                    parsed_event = dest_contract.events.Unwrap().process_log(event)
-                    token = parsed_event.args.underlying_token
-                    recipient = parsed_event.args.to
-                    amount = parsed_event.args.amount
-                    
-                    print(f"Found Unwrap: Token: {token}, Recipient: {recipient}, Amount: {amount}")
-                    
-                    # Process the withdraw
-                    nonce = w3_source.eth.get_transaction_count(warden_address)
-                    
-                    withdraw_tx = source_contract.functions.withdraw(
-                        token,
-                        recipient,
-                        amount
-                    ).build_transaction({
-                        'from': warden_address,
-                        'gas': 200000,
-                        'gasPrice': w3_source.eth.gas_price * 2,
-                        'nonce': nonce,
-                    })
-                    
-                    signed_tx = w3_source.eth.account.sign_transaction(withdraw_tx, warden_key)
-                    tx_hash = w3_source.eth.send_raw_transaction(signed_tx.raw_transaction)
-                    
-                    print(f"Sent withdraw transaction: {tx_hash.hex()}")
-                    
-                    receipt = w3_source.eth.wait_for_transaction_receipt(tx_hash)
-                    if receipt.status == 1:
-                        print("Withdraw transaction succeeded")
-                    else:
-                        print("Withdraw transaction failed")
-                
-            except Exception as final_e:
-                print(f"Final attempt also failed: {final_e}")
+        
+        except Exception as e:
+            print(f"Error scanning destination chain: {e}")
 
     return 1
 
