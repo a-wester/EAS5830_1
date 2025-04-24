@@ -153,6 +153,11 @@ def scan_blocks(chain, contract_info="contract_info.json"):
                 max_nonce_retries = 3
                 for nonce_retry in range(max_nonce_retries):
                     try:
+                        # Get current gas price and reduce it to avoid insufficient funds errors
+                        gas_price = w3_dest.eth.gas_price
+                        # Set a more conservative gas price to avoid insufficient funds
+                        adjusted_gas_price = min(gas_price, 5000000000)  # 5 gwei cap
+                        
                         wrap_tx = dest_contract.functions.wrap(
                             token,
                             recipient,
@@ -160,7 +165,7 @@ def scan_blocks(chain, contract_info="contract_info.json"):
                         ).build_transaction({
                             'from': warden_address,
                             'gas': 200000,
-                            'gasPrice': w3_dest.eth.gas_price,
+                            'gasPrice': adjusted_gas_price,
                             'nonce': nonce + nonce_retry,
                         })
 
@@ -187,39 +192,135 @@ def scan_blocks(chain, contract_info="contract_info.json"):
                             raise  # Re-raise other exceptions or if we've exhausted retries
                 
             except Exception as e:
+                error_msg = str(e)
                 print(f"Error processing deposit event: {e}")
+                
+                # Check for insufficient funds error and attempt with lower gas price if needed
+                if "insufficient funds" in error_msg:
+                    try:
+                        print("Attempting transaction with lower gas price due to insufficient funds")
+                        nonce = w3_dest.eth.get_transaction_count(warden_address)
+                        
+                        # Set an even lower gas price
+                        very_low_gas_price = 1000000000  # 1 gwei
+                        
+                        wrap_tx = dest_contract.functions.wrap(
+                            token,
+                            recipient,
+                            amount
+                        ).build_transaction({
+                            'from': warden_address,
+                            'gas': 150000,  # Reduced gas limit
+                            'gasPrice': very_low_gas_price,
+                            'nonce': nonce,
+                        })
+
+                        signed_tx = w3_dest.eth.account.sign_transaction(wrap_tx, warden_key)
+                        tx_hash = w3_dest.eth.send_raw_transaction(signed_tx.raw_transaction)
+
+                        print(f"Sent wrap transaction with minimal gas price: {tx_hash.hex()}")
+
+                        receipt = w3_dest.eth.wait_for_transaction_receipt(tx_hash)
+                        if receipt.status == 1:
+                            print("Wrap transaction succeeded with minimal gas price")
+                        else:
+                            print("Wrap transaction failed even with minimal gas price")
+                    except Exception as retry_e:
+                        print(f"Retry with minimal gas price also failed: {retry_e}")
+                
                 continue
 
-    elif chain == 'destination':
+    el    if chain == 'destination':
         print(f"Scanning blocks {start_block_dest} to {current_block_dest} on destination chain")
         
-        # Using scan_blocks code from the old implementation for Unwrap events
-        arg_filter = {}
+        # Try both approaches for event detection to maximize chances of success
         events = []
         
-        if start_block_dest == current_block_dest:
-            print(f"Scanning block {start_block_dest} on destination chain")
-        else:
-            print(f"Scanning blocks {start_block_dest} - {current_block_dest} on destination chain")
+        # First approach: Using event filter
+        try:
+            print(f"Scanning blocks {start_block_dest} - {current_block_dest} on destination chain using event filter")
+            arg_filter = {}
+            
+            if start_block_dest == current_block_dest:
+                print(f"Scanning block {start_block_dest} on destination chain")
+            else:
+                print(f"Scanning blocks {start_block_dest} - {current_block_dest} on destination chain")
 
-        if current_block_dest - start_block_dest < 30:
-            event_filter = dest_contract.events.Unwrap.create_filter(
-                from_block=start_block_dest, 
-                to_block=current_block_dest, 
-                argument_filters=arg_filter
-            )
-            events = event_filter.get_all_entries()
-            print(f"Got {len(events)} Unwrap entries")
-        else:
-            for block_num in range(start_block_dest, current_block_dest + 1):
+            if current_block_dest - start_block_dest < 30:
                 event_filter = dest_contract.events.Unwrap.create_filter(
-                    from_block=block_num, 
-                    to_block=block_num, 
+                    from_block=start_block_dest, 
+                    to_block=current_block_dest, 
                     argument_filters=arg_filter
                 )
-                block_events = event_filter.get_all_entries()
-                print(f"Got {len(block_events)} Unwrap entries for block {block_num}")
-                events.extend(block_events)
+                events = event_filter.get_all_entries()
+                print(f"Got {len(events)} Unwrap entries using event filter")
+            else:
+                for block_num in range(start_block_dest, current_block_dest + 1):
+                    event_filter = dest_contract.events.Unwrap.create_filter(
+                        from_block=block_num, 
+                        to_block=block_num, 
+                        argument_filters=arg_filter
+                    )
+                    block_events = event_filter.get_all_entries()
+                    print(f"Got {len(block_events)} Unwrap entries for block {block_num} using event filter")
+                    events.extend(block_events)
+        except Exception as filter_error:
+            print(f"Error using event filter approach: {filter_error}")
+            events = []
+            
+        # Second approach: Using get_logs with topic if first approach failed or found no events
+        if len(events) == 0:
+            try:
+                print("Trying get_logs approach with topic filtering since event filter found no events")
+                unwrap_topic = w3_dest.keccak(text="Unwrap(address,address,uint256)").hex()
+                
+                logs = retry_rpc_call(
+                    w3_dest.eth.get_logs,
+                    {
+                        'fromBlock': start_block_dest,
+                        'toBlock': current_block_dest,
+                        'address': dest_address,
+                        'topics': [unwrap_topic]
+                    }
+                )
+                
+                print(f"Got {len(logs)} Unwrap logs using topic filtering")
+                
+                for log in logs:
+                    try:
+                        parsed_event = dest_contract.events.Unwrap().process_log(log)
+                        events.append(parsed_event)
+                    except Exception as parse_error:
+                        print(f"Error parsing log: {parse_error}")
+                        continue
+            
+            except Exception as topic_error:
+                print(f"Error using topic filtering approach: {topic_error}")
+                # If all else fails, check just the last few blocks individually
+                try:
+                    print("As a last resort, checking last few blocks individually")
+                    for block_num in range(current_block_dest - 3, current_block_dest + 1):
+                        try:
+                            unwrap_topic = w3_dest.keccak(text="Unwrap(address,address,uint256)").hex()
+                            block_logs = w3_dest.eth.get_logs({
+                                'fromBlock': block_num,
+                                'toBlock': block_num,
+                                'address': dest_address,
+                                'topics': [unwrap_topic]
+                            })
+                            
+                            for log in block_logs:
+                                try:
+                                    parsed_event = dest_contract.events.Unwrap().process_log(log)
+                                    events.append(parsed_event)
+                                except Exception as parse_error:
+                                    print(f"Error parsing log from block {block_num}: {parse_error}")
+                                    continue
+                        except Exception as block_error:
+                            print(f"Error checking block {block_num}: {block_error}")
+                            continue
+                except Exception as final_error:
+                    print(f"Final attempt to get events also failed: {final_error}")
 
         print(f"Found {len(events)} Unwrap events")
         
@@ -238,6 +339,11 @@ def scan_blocks(chain, contract_info="contract_info.json"):
                     try:
                         nonce = w3_source.eth.get_transaction_count(warden_address)
                         
+                        # Get current gas price and reduce it to avoid insufficient funds errors
+                        gas_price = w3_source.eth.gas_price
+                        # Set a more conservative gas price to avoid insufficient funds
+                        adjusted_gas_price = min(gas_price, 5000000000)  # 5 gwei cap
+                        
                         withdraw_tx = source_contract.functions.withdraw(
                             token,
                             recipient,
@@ -245,7 +351,7 @@ def scan_blocks(chain, contract_info="contract_info.json"):
                         ).build_transaction({
                             'from': warden_address,
                             'gas': 200000,
-                            'gasPrice': w3_source.eth.gas_price,
+                            'gasPrice': adjusted_gas_price,
                             'nonce': nonce + nonce_retry,  # Increment nonce on retries
                         })
                         
@@ -272,7 +378,42 @@ def scan_blocks(chain, contract_info="contract_info.json"):
                             raise  # Re-raise other exceptions or if we've exhausted retries
                         
             except Exception as e:
+                error_msg = str(e)
                 print(f"Error processing unwrap event: {e}")
+                
+                # Check for insufficient funds error and attempt with lower gas price if needed
+                if "insufficient funds" in error_msg:
+                    try:
+                        print("Attempting transaction with lower gas price due to insufficient funds")
+                        nonce = w3_source.eth.get_transaction_count(warden_address)
+                        
+                        # Set an even lower gas price
+                        very_low_gas_price = 1000000000  # 1 gwei
+                        
+                        withdraw_tx = source_contract.functions.withdraw(
+                            token,
+                            recipient,
+                            amount
+                        ).build_transaction({
+                            'from': warden_address,
+                            'gas': 150000,  # Reduced gas limit
+                            'gasPrice': very_low_gas_price,
+                            'nonce': nonce,
+                        })
+
+                        signed_tx = w3_source.eth.account.sign_transaction(withdraw_tx, warden_key)
+                        tx_hash = w3_source.eth.send_raw_transaction(signed_tx.raw_transaction)
+
+                        print(f"Sent withdraw transaction with minimal gas price: {tx_hash.hex()}")
+
+                        receipt = w3_source.eth.wait_for_transaction_receipt(tx_hash)
+                        if receipt.status == 1:
+                            print("Withdraw transaction succeeded with minimal gas price")
+                        else:
+                            print("Withdraw transaction failed even with minimal gas price")
+                    except Exception as retry_e:
+                        print(f"Retry with minimal gas price also failed: {retry_e}")
+                
                 continue
 
     return 1
@@ -329,12 +470,16 @@ def register_tokens(contract_info="contract_info.json", token_csv="erc20s.csv"):
                 # Get fresh nonce for source chain transaction
                 nonce = w3_source.eth.get_transaction_count(warden_address)
                 
+                # Use a more conservative gas price
+                gas_price = w3_source.eth.gas_price
+                adjusted_gas_price = min(gas_price, 5000000000)  # 5 gwei cap
+                
                 register_tx = source_contract.functions.registerToken(
                     Web3.to_checksum_address(source_token)
                 ).build_transaction({
                     'from': warden_address,
                     'gas': 200000, 
-                    'gasPrice': w3_source.eth.gas_price,
+                    'gasPrice': adjusted_gas_price,
                     'nonce': nonce,
                 })
                 
@@ -348,6 +493,10 @@ def register_tokens(contract_info="contract_info.json", token_csv="erc20s.csv"):
                 # Get fresh nonce for destination chain transaction
                 nonce = w3_dest.eth.get_transaction_count(warden_address)
                 
+                # Use a more conservative gas price
+                gas_price = w3_dest.eth.gas_price
+                adjusted_gas_price = min(gas_price, 5000000000)  # 5 gwei cap
+                
                 create_tx = dest_contract.functions.createToken(
                     Web3.to_checksum_address(source_token),
                     name,
@@ -355,7 +504,7 @@ def register_tokens(contract_info="contract_info.json", token_csv="erc20s.csv"):
                 ).build_transaction({
                     'from': warden_address,
                     'gas': 200000,
-                    'gasPrice': w3_dest.eth.gas_price,
+                    'gasPrice': adjusted_gas_price,
                     'nonce': nonce,
                 })
                 
@@ -399,14 +548,18 @@ def create_missing_tokens():
         nonce = w3_dest.eth.get_transaction_count(warden_address)
         print(f"Creating token {tokens_to_create[0]} with nonce {nonce}")
         
-        tx = dest_contract.functions.createToken(
+                        # Use a more conservative gas price
+                gas_price = w3_dest.eth.gas_price
+                adjusted_gas_price = min(gas_price, 5000000000)  # 5 gwei cap
+                
+                tx = dest_contract.functions.createToken(
             Web3.to_checksum_address(tokens_to_create[0]),
             name,
             symbol
         ).build_transaction({
             'from': warden_address,
             'gas': 3000000,
-            'gasPrice': w3_dest.eth.gas_price,
+            'gasPrice': adjusted_gas_price,
             'nonce': nonce,
         })
 
@@ -426,14 +579,18 @@ def create_missing_tokens():
         nonce = w3_dest.eth.get_transaction_count(warden_address)
         print(f"Creating token {tokens_to_create[1]} with nonce {nonce}")
         
-        tx = dest_contract.functions.createToken(
+                        # Use a more conservative gas price
+                gas_price = w3_dest.eth.gas_price
+                adjusted_gas_price = min(gas_price, 5000000000)  # 5 gwei cap
+                
+                tx = dest_contract.functions.createToken(
             Web3.to_checksum_address(tokens_to_create[1]),
             name,
             symbol
         ).build_transaction({
             'from': warden_address,
             'gas': 3000000,
-            'gasPrice': w3_dest.eth.gas_price,
+            'gasPrice': adjusted_gas_price,
             'nonce': nonce,
         })
 
