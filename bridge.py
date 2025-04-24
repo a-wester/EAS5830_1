@@ -52,13 +52,13 @@ def retry_rpc_call(func, *args, max_retries=5, **kwargs):
             if hasattr(e, 'args') and len(e.args) > 0:
                 error_msg = str(e.args[0])
                 if 'limit exceeded' in error_msg or 'rate limit' in error_msg:
-                    wait_time = 30
+                    wait_time = (2 ** attempt) + random.uniform(0, 1)
                     print(f"Rate limit or limit exceeded. Retrying in {wait_time:.2f} seconds...")
                     time.sleep(wait_time)
                     continue
             
             # For other errors, retry with shorter wait
-            wait_time = 30
+            wait_time = (1.5 ** attempt) + random.uniform(0, 0.5)
             print(f"RPC call failed, retrying in {wait_time:.2f} seconds... Error: {e}")
             time.sleep(wait_time)
 
@@ -257,7 +257,7 @@ def scan_blocks(chain, contract_info="contract_info.json"):
                 print("Trying direct approach for most recent block...")
                 last_block = current_block_dest - 2  # Often unwrap events are 2 blocks before current
                 
-                time.sleep(20)  # Significant delay to avoid rate limits
+                time.sleep(10)  # Significant delay to avoid rate limits
                 
                 unwrap_topic = w3_dest.keccak(text="Unwrap(address,address,uint256)").hex()
                 unwrap_events = w3_dest.eth.get_logs({
@@ -394,7 +394,7 @@ def register_tokens(contract_info="contract_info.json", token_csv="erc20s.csv"):
                 receipt = w3_dest.eth.wait_for_transaction_receipt(tx_hash)
                 
                 # Add a delay between token registrations to avoid rate limiting
-                time.sleep(20)
+                time.sleep(10)
                 
             except Exception as e:
                 print(f"Error registering/creating token {source_token}: {e}")
@@ -446,7 +446,7 @@ def create_missing_tokens():
         print(f"Failed to create token {tokens_to_create[0]}: {e}")
     
     # Always wait between transactions
-    time.sleep(20)
+    time.sleep(10)
     
     # Second token (with fresh nonce)
     try:
@@ -482,6 +482,6 @@ if __name__ == "__main__":
     scan_blocks('source')
     
     # Add delay between chain operations
-    time.sleep(20)
+    time.sleep(10)
     
     scan_blocks('destination')
