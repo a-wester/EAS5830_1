@@ -474,7 +474,6 @@ def create_missing_tokens():
 
 
 if __name__ == "__main__":
-    # Professor already created the tokens, so keep this commented out
     # register_tokens()
     # create_missing_tokens()
     
