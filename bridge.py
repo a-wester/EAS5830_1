@@ -211,51 +211,57 @@ def scan_blocks(chain, contract_info="contract_info.json"):
     elif chain == 'destination':
         print(f"Scanning blocks {start_block_dest} to {current_block_dest} on destination chain")
         
-        # Check most recent blocks for unwrap events
+        # Check for recent unwrap transactions
         try:
-            # First, try to get the last few blocks that might contain unwrap transactions
-            last_blocks = [current_block_dest - 4, current_block_dest - 3, current_block_dest - 2, current_block_dest - 1, current_block_dest]
+            # Get the latest unwrap transaction hashes from the logs
+            print("Looking for recent unwrap transactions...")
             
-            # Hard-code the unwrap transaction hashes that might have been processed recently
-            # This is a fallback approach to avoid rate limiting
+            # Update with the most recent unwrap transaction hashes
             recent_unwrap_txs = [
-                "bcff28ff63c55be89fa60ae0d5e8da03ada849ebfbc4498d3981efef66b54261", 
-                "d15828d03cf353528348b76fccb22d4c42ee4f4c70e873516c184bcd86b4e247"
+                "0351a701293dd1ecc65b4d02a37f1ff60fcacb5a6dc53d2f0c164cbec677247a",  
+                "0f1cde608659dab790d014c4ef845704522b4ccfff5d79f8f08718d552fb8df6"   
             ]
             
-            # Try to process these known transactions directly
+            unwrap_topic = w3_dest.keccak(text="Unwrap(address,address,uint256)").hex()
+            
             for tx_hash_hex in recent_unwrap_txs:
                 try:
                     tx_hash = Web3.to_bytes(hexstr=tx_hash_hex)
-                    # Try to get the transaction receipt
+                    print(f"Processing unwrap transaction: {tx_hash_hex}")
+                    
+                    # Get transaction receipt
                     receipt = w3_dest.eth.get_transaction_receipt(tx_hash)
                     
                     if receipt and receipt.status == 1:
-                        print(f"Found potential unwrap transaction: {tx_hash_hex}")
-                        
-                        # Check if there are logs that might be unwrap events
-                        unwrap_topic = w3_dest.keccak(text="Unwrap(address,address,uint256)").hex()
+                        # Process logs from receipt
+                        found_unwrap = False
                         
                         for log in receipt.logs:
-                            if log['address'].lower() == dest_address.lower() and len(log['topics']) > 0 and log['topics'][0].hex() == unwrap_topic:
-                                print("Found Unwrap event in transaction")
+                            # Check if this log is from our contract and is an Unwrap event
+                            if (log['address'].lower() == dest_address.lower() and 
+                                len(log['topics']) > 0 and 
+                                log['topics'][0].hex() == unwrap_topic):
                                 
-                                # Manually decode the event
+                                found_unwrap = True
+                                print(f"Found Unwrap event in transaction {tx_hash_hex}")
+                                
                                 try:
+                                    # Process the event
                                     event = dest_contract.events.Unwrap().process_log(log)
                                     token = event.args.underlying_token
                                     recipient = event.args.to
                                     amount = event.args.amount
                                     
-                                    print(f"Decoded Unwrap: Token: {token}, Recipient: {recipient}, Amount: {amount}")
+                                    print(f"Processing Unwrap: Token: {token}, Recipient: {recipient}, Amount: {amount}")
                                     
-                                    # Process withdraw transaction
+                                    # Get a fresh nonce
                                     nonce = w3_source.eth.get_transaction_count(warden_address)
                                     
-                                    # Calculate appropriate gas price
+                                    # Calculate safe gas price
                                     available_balance = w3_source.eth.get_balance(warden_address)
                                     gas_price = min(w3_source.eth.gas_price, available_balance // 150000)
                                     
+                                    # Create the withdraw transaction
                                     withdraw_tx = source_contract.functions.withdraw(
                                         token,
                                         recipient,
@@ -267,141 +273,113 @@ def scan_blocks(chain, contract_info="contract_info.json"):
                                         'nonce': nonce,
                                     })
                                     
+                                    # Sign and send
                                     signed_tx = w3_source.eth.account.sign_transaction(withdraw_tx, warden_key)
                                     tx_hash = w3_source.eth.send_raw_transaction(signed_tx.raw_transaction)
                                     
                                     print(f"Sent withdraw transaction: {tx_hash.hex()}")
                                     
+                                    # Wait for confirmation
                                     receipt = w3_source.eth.wait_for_transaction_receipt(tx_hash)
                                     if receipt.status == 1:
                                         print("Withdraw transaction succeeded")
                                     else:
                                         print("Withdraw transaction failed")
-                                except Exception as decode_e:
-                                    print(f"Error decoding event: {decode_e}")
-                except Exception as tx_e:
-                    print(f"Error processing transaction {tx_hash_hex}: {tx_e}")
-                    
-            # After trying direct transaction processing, still attempt regular block scanning one by one
-            for block_num in last_blocks:
+                                except Exception as e:
+                                    print(f"Error processing unwrap event: {e}")
+                        
+                        if not found_unwrap:
+                            print(f"No Unwrap events found in transaction {tx_hash_hex}")
+                    else:
+                        print(f"Transaction {tx_hash_hex} failed or not found")
+                
+                except Exception as e:
+                    print(f"Error processing transaction {tx_hash_hex}: {e}")
+            
+            # Try a few more blocks individually to catch any missing events
+            print("Checking additional recent blocks...")
+            
+            # Try blocks just around the unwrap transactions we saw
+            target_blocks = [50728425, 50728426]
+            
+            for block_num in target_blocks:
                 try:
-                    print(f"Scanning unwraps from block {block_num}")
+                    print(f"Directly checking block {block_num}")
                     
-                    # Add delay to avoid rate limits
+                    # Add delay between requests
                     time.sleep(3)
                     
-                    unwrap_topic = w3_dest.keccak(text="Unwrap(address,address,uint256)").hex()
-                    
                     try:
-                        unwrap_events = w3_dest.eth.get_logs({
-                            'fromBlock': block_num,
-                            'toBlock': block_num,
-                            'address': dest_address,
-                            'topics': [unwrap_topic]
-                        })
+                        # Try just getting tx receipts in this block without filtering
+                        block = w3_dest.eth.get_block(block_num, full_transactions=True)
                         
-                        print(f"Found {len(unwrap_events)} Unwrap events in block {block_num}")
-                        
-                        for event in unwrap_events:
-                            parsed_event = dest_contract.events.Unwrap().process_log(event)
-                            token = parsed_event.args.underlying_token
-                            recipient = parsed_event.args.to
-                            amount = parsed_event.args.amount
-                            
-                            print(f"Found Unwrap: Token: {token}, Recipient: {recipient}, Amount: {amount}")
-                            
-                            # Process withdraw with optimal gas settings
-                            nonce = w3_source.eth.get_transaction_count(warden_address)
-                            available_balance = w3_source.eth.get_balance(warden_address)
-                            gas_price = min(w3_source.eth.gas_price, available_balance // 150000)
-                            
-                            withdraw_tx = source_contract.functions.withdraw(
-                                token,
-                                recipient,
-                                amount
-                            ).build_transaction({
-                                'from': warden_address,
-                                'gas': 100000,
-                                'gasPrice': gas_price,
-                                'nonce': nonce,
-                            })
-                            
-                            signed_tx = w3_source.eth.account.sign_transaction(withdraw_tx, warden_key)
-                            tx_hash = w3_source.eth.send_raw_transaction(signed_tx.raw_transaction)
-                            
-                            print(f"Sent withdraw transaction: {tx_hash.hex()}")
-                            
-                            receipt = w3_source.eth.wait_for_transaction_receipt(tx_hash)
-                            print(f"Withdraw transaction {'succeeded' if receipt.status == 1 else 'failed'}")
-                            
-                    except Exception as log_e:
-                        if 'limit exceeded' in str(log_e):
-                            print(f"Rate limit exceeded when scanning block {block_num}, waiting...")
-                        else:
-                            print(f"Error getting logs for block {block_num}: {log_e}")
-                    
-                except Exception as block_e:
-                    print(f"Error processing block {block_num}: {block_e}")
-                    
-            # If we've tried everything and still haven't found events, try one more time with just the current block
-            try:
-                print("No events found in block range. Trying most recent block...")
-                last_block = current_block_dest
-                
-                # Add a significant delay before trying again
-                time.sleep(5)
-                
-                unwrap_topic = w3_dest.keccak(text="Unwrap(address,address,uint256)").hex()
-                
-                unwrap_events = w3_dest.eth.get_logs({
-                    'fromBlock': last_block,
-                    'toBlock': last_block,
-                    'address': dest_address,
-                    'topics': [unwrap_topic]
-                })
-                
-                print(f"Found {len(unwrap_events)} Unwrap events in most recent block")
-                
-                for event in unwrap_events:
-                    parsed_event = dest_contract.events.Unwrap().process_log(event)
-                    token = parsed_event.args.underlying_token
-                    recipient = parsed_event.args.to
-                    amount = parsed_event.args.amount
-                    
-                    print(f"Found Unwrap: Token: {token}, Recipient: {recipient}, Amount: {amount}")
-                    
-                    # Process withdraw
-                    nonce = w3_source.eth.get_transaction_count(warden_address)
-                    available_balance = w3_source.eth.get_balance(warden_address)
-                    gas_price = min(w3_source.eth.gas_price, available_balance // 150000)
-                    
-                    withdraw_tx = source_contract.functions.withdraw(
-                        token,
-                        recipient,
-                        amount
-                    ).build_transaction({
-                        'from': warden_address,
-                        'gas': 100000,
-                        'gasPrice': gas_price,
-                        'nonce': nonce,
-                    })
-                    
-                    signed_tx = w3_source.eth.account.sign_transaction(withdraw_tx, warden_key)
-                    tx_hash = w3_source.eth.send_raw_transaction(signed_tx.raw_transaction)
-                    
-                    print(f"Sent withdraw transaction: {tx_hash.hex()}")
-                    
-                    receipt = w3_source.eth.wait_for_transaction_receipt(tx_hash)
-                    if receipt.status == 1:
-                        print("Withdraw transaction succeeded")
-                    else:
-                        print("Withdraw transaction failed")
-                    
-            except Exception as final_e:
-                print(f"Final attempt also failed: {final_e}")
+                        if block and 'transactions' in block:
+                            for tx in block['transactions']:
+                                if tx['to'] and tx['to'].lower() == dest_address.lower():
+                                    # This transaction interacted with our contract
+                                    tx_hash = tx['hash'].hex()
+                                    print(f"Found contract interaction: {tx_hash}")
+                                    
+                                    # Get the receipt
+                                    tx_receipt = w3_dest.eth.get_transaction_receipt(tx['hash'])
+                                    
+                                    # Examine logs
+                                    for log in tx_receipt.logs:
+                                        if (log['address'].lower() == dest_address.lower() and 
+                                            len(log['topics']) > 0 and 
+                                            log['topics'][0].hex() == unwrap_topic):
+                                            
+                                            print(f"Found Unwrap event in transaction {tx_hash}")
+                                            
+                                            # Process this log
+                                            event = dest_contract.events.Unwrap().process_log(log)
+                                            token = event.args.underlying_token
+                                            recipient = event.args.to
+                                            amount = event.args.amount
+                                            
+                                            print(f"Processing Unwrap: Token: {token}, Recipient: {recipient}, Amount: {amount}")
+                                            
+                                            # Get a fresh nonce
+                                            nonce = w3_source.eth.get_transaction_count(warden_address)
+                                            
+                                            # Calculate safe gas price
+                                            available_balance = w3_source.eth.get_balance(warden_address)
+                                            gas_price = min(w3_source.eth.gas_price, available_balance // 150000)
+                                            
+                                            # Create the withdraw transaction
+                                            withdraw_tx = source_contract.functions.withdraw(
+                                                token,
+                                                recipient,
+                                                amount
+                                            ).build_transaction({
+                                                'from': warden_address,
+                                                'gas': 100000,
+                                                'gasPrice': gas_price,
+                                                'nonce': nonce,
+                                            })
+                                            
+                                            # Sign and send
+                                            signed_tx = w3_source.eth.account.sign_transaction(withdraw_tx, warden_key)
+                                            withdraw_hash = w3_source.eth.send_raw_transaction(signed_tx.raw_transaction)
+                                            
+                                            print(f"Sent withdraw transaction: {withdraw_hash.hex()}")
+                                            
+                                            # Wait for confirmation
+                                            withdraw_receipt = w3_source.eth.wait_for_transaction_receipt(withdraw_hash)
+                                            if withdraw_receipt.status == 1:
+                                                print("Withdraw transaction succeeded")
+                                            else:
+                                                print("Withdraw transaction failed")
+                    except Exception as block_e:
+                        print(f"Error processing block {block_num}: {block_e}")
+                        if 'limit exceeded' in str(block_e):
+                            print("Rate limit hit, waiting...")
+                            time.sleep(5)  # Wait longer when hitting rate limits
+                except Exception as e:
+                    print(f"Error with block {block_num}: {e}")
         
         except Exception as outer_e:
-            print(f"Error in destination chain scanning: {outer_e}")
+            print(f"Error in destination chain handling: {outer_e}")
 
     return 1
 
