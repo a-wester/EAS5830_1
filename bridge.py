@@ -101,10 +101,11 @@ def scan_blocks(chain, contract_info="contract_info.json"):
     current_block_dest = w3_dest.eth.block_number
 
     start_block_source = max(0, current_block_source - 5)
-    start_block_dest = max(0, current_block_dest - 10)
+    start_block_dest = max(0, current_block_dest - 10)  # Increased from 2 to 10 to scan more historical blocks
 
     if chain == 'source':
         print(f"Scanning blocks {start_block_source} to {current_block_source} on source chain")
+    print(f"Scanning blocks {start_block_source} - {current_block_source} on source chain")
 
         try:
             # Use create_filter approach exactly as in Bridge IV
@@ -172,6 +173,7 @@ def scan_blocks(chain, contract_info="contract_info.json"):
 
     elif chain == 'destination':
         print(f"Scanning blocks {start_block_dest} to {current_block_dest} on destination chain")
+    print(f"Scanning blocks {start_block_dest} - {current_block_dest} on destination chain")
         
         try:
             # Use create_filter approach exactly as in Bridge IV
