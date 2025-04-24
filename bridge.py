@@ -38,7 +38,6 @@ def get_contract_info(chain, contract_info):
     return contracts[chain]
 
 
-# Helper function for retry logic
 def retry_rpc_call(func, *args, max_retries=5, **kwargs):
     """Retry RPC calls with exponential backoff"""
     for attempt in range(max_retries):
@@ -48,7 +47,6 @@ def retry_rpc_call(func, *args, max_retries=5, **kwargs):
             if attempt == max_retries - 1:
                 raise
             
-            # Check if it's a limit exceeded error
             if hasattr(e, 'args') and len(e.args) > 0:
                 error_msg = str(e.args[0])
                 if 'limit exceeded' in error_msg or 'rate limit' in error_msg:
@@ -57,7 +55,6 @@ def retry_rpc_call(func, *args, max_retries=5, **kwargs):
                     time.sleep(wait_time)
                     continue
             
-            # For other errors, retry with shorter wait
             wait_time = (1.5 ** attempt) + random.uniform(0, 0.5)
             print(f"RPC call failed, retrying in {wait_time:.2f} seconds... Error: {e}")
             time.sleep(wait_time)
@@ -97,6 +94,7 @@ def scan_blocks(chain, contract_info="contract_info.json"):
         abi=info["destination"]["abi"]
     )
 
+    # Fix: Get block numbers directly instead of using retry_rpc_call
     current_block_source = w3_source.eth.block_number
     current_block_dest = w3_dest.eth.block_number
 
@@ -107,15 +105,21 @@ def scan_blocks(chain, contract_info="contract_info.json"):
         print(f"Scanning blocks {start_block_source} to {current_block_source} on source chain")
 
         try:
-            # Use retry wrapper for RPC call
-            deposit_events = retry_rpc_call(
-                w3_source.eth.get_logs,
-                {
+            # Fix: Use direct call for get_logs with try/except instead of retry_rpc_call
+            try:
+                deposit_events = w3_source.eth.get_logs({
                     'fromBlock': start_block_source,
                     'toBlock': current_block_source,
                     'address': source_address
-                }
-            )
+                })
+            except Exception as e:
+                print(f"Error getting logs: {e}")
+                # Try with a smaller block range
+                deposit_events = w3_source.eth.get_logs({
+                    'fromBlock': max(0, current_block_source - 2),
+                    'toBlock': current_block_source,
+                    'address': source_address
+                })
 
             print(f"Found {len(deposit_events)} Deposit events")
 
@@ -127,11 +131,9 @@ def scan_blocks(chain, contract_info="contract_info.json"):
                     amount = parsed_event.args.amount
 
                     print(f"Found Deposit: Token: {token}, Recipient: {recipient}, Amount: {amount}")
-
-                    # Get a fresh nonce for each transaction
+                    
                     nonce = w3_dest.eth.get_transaction_count(warden_address)
                     
-                    # Try to build and send the transaction with retry logic for nonce issues
                     max_nonce_retries = 3
                     for nonce_retry in range(max_nonce_retries):
                         try:
@@ -141,7 +143,7 @@ def scan_blocks(chain, contract_info="contract_info.json"):
                                 amount
                             ).build_transaction({
                                 'from': warden_address,
-                                'gas': 200000,
+                                'gas': 300000,  # Increased gas limit
                                 'gasPrice': w3_dest.eth.gas_price,
                                 'nonce': nonce + nonce_retry,  # Increment nonce on retries
                             })
@@ -166,7 +168,7 @@ def scan_blocks(chain, contract_info="contract_info.json"):
                                 print(f"Nonce too low. Retrying with incremented nonce {nonce + nonce_retry + 1}")
                                 continue
                             else:
-                                raise  # Re-raise other exceptions or if we've exhausted retries
+                                raise
                     
                 except Exception as e:
                     print(f"Error processing deposit event: {e}")
@@ -178,25 +180,36 @@ def scan_blocks(chain, contract_info="contract_info.json"):
     elif chain == 'destination':
         print(f"Scanning blocks {start_block_dest} to {current_block_dest} on destination chain")
         
-        # destination chain, need a more direct approach due to rate limits
-        time.sleep(3)
+        # Add a delay to avoid rate limiting
+        time.sleep(5)
+        
+        # Reduce the number of blocks scanned to avoid rate limiting
+        recent_block = max(0, current_block_dest - 1)
+        
         try:
-            print(f"Scanning unwraps from blocks {start_block_dest} to {current_block_dest} on destination chain")
+            print(f"Scanning unwraps from blocks {recent_block} to {current_block_dest} on destination chain")
             unwrap_topic = w3_dest.keccak(text="Unwrap(address,address,uint256)").hex()
 
-            unwrap_events = retry_rpc_call(
-                w3_dest.eth.get_logs,
-                {
-                    'fromBlock': start_block_dest,
+            try:
+                # Directly use get_logs with a try/except block
+                unwrap_events = w3_dest.eth.get_logs({
+                    'fromBlock': recent_block,
                     'toBlock': current_block_dest,
                     'address': dest_address,
                     'topics': [unwrap_topic]
-                }
-            )
-
+                })
+            except Exception as e:
+                print(f"Error getting unwrap logs: {e}")
+                # Try with just the most recent block if we get an error
+                unwrap_events = w3_dest.eth.get_logs({
+                    'fromBlock': current_block_dest,
+                    'toBlock': current_block_dest,
+                    'address': dest_address,
+                    'topics': [unwrap_topic]
+                })
 
             print(f"Found {len(unwrap_events)} Unwrap events")
-            for event in unwrap_events: # your unwrap processing logic...
+            for event in unwrap_events:
                 try:
                     parsed_event = dest_contract.events.Unwrap().process_log(event)
                     token = parsed_event.args.underlying_token
@@ -205,7 +218,7 @@ def scan_blocks(chain, contract_info="contract_info.json"):
                     
                     print(f"Found Unwrap: Token: {token}, Recipient: {recipient}, Amount: {amount}")
                     
-                    # fresh nonce with retry logic
+                    # Get a fresh nonce with retry logic
                     max_nonce_retries = 3
                     for nonce_retry in range(max_nonce_retries):
                         try:
@@ -217,9 +230,9 @@ def scan_blocks(chain, contract_info="contract_info.json"):
                                 amount
                             ).build_transaction({
                                 'from': warden_address,
-                                'gas': 200000,
-                                'gasPrice': w3_source.eth.gas_price * 2,  # Double gas price for faster processing
-                                'nonce': nonce + nonce_retry,  # Increment nonce on retries
+                                'gas': 300000,  # Increased gas
+                                'gasPrice': w3_source.eth.gas_price * 2,
+                                'nonce': nonce + nonce_retry,
                             })
                             
                             signed_tx = w3_source.eth.account.sign_transaction(withdraw_tx, warden_key)
@@ -242,7 +255,7 @@ def scan_blocks(chain, contract_info="contract_info.json"):
                                 print(f"Nonce too low. Retrying with incremented nonce {nonce + nonce_retry + 1}")
                                 continue
                             else:
-                                raise  # Re-raise other exceptions or if we've exhausted retries
+                                raise
                             
                 except Exception as e:
                     print(f"Error processing unwrap event: {e}")
@@ -251,20 +264,30 @@ def scan_blocks(chain, contract_info="contract_info.json"):
         except Exception as outer_e:
             print(f"Error scanning destination chain: {outer_e}")
             
-            # As a last resort, try to directly check blocks where unwrap events are most likely
             try:
                 print("Trying direct approach for most recent block...")
-                last_block = current_block_dest - 2  # Often unwrap events are 2 blocks before current
+                last_block = current_block_dest - 1  # Try most recent block
                 
                 time.sleep(10)  # Significant delay to avoid rate limits
                 
                 unwrap_topic = w3_dest.keccak(text="Unwrap(address,address,uint256)").hex()
-                unwrap_events = w3_dest.eth.get_logs({
-                    'fromBlock': last_block,
-                    'toBlock': last_block,
-                    'address': dest_address,
-                    'topics': [unwrap_topic]
-                })
+                
+                try:
+                    unwrap_events = w3_dest.eth.get_logs({
+                        'fromBlock': last_block,
+                        'toBlock': last_block,
+                        'address': dest_address,
+                        'topics': [unwrap_topic]
+                    })
+                except Exception as log_e:
+                    print(f"Error getting logs in fallback: {log_e}")
+                    # Try directly with the current block if all else fails
+                    unwrap_events = w3_dest.eth.get_logs({
+                        'fromBlock': current_block_dest,
+                        'toBlock': current_block_dest,
+                        'address': dest_address,
+                        'topics': [unwrap_topic]
+                    })
                 
                 for event in unwrap_events:
                     parsed_event = dest_contract.events.Unwrap().process_log(event)
@@ -283,7 +306,7 @@ def scan_blocks(chain, contract_info="contract_info.json"):
                         amount
                     ).build_transaction({
                         'from': warden_address,
-                        'gas': 200000,
+                        'gas': 300000,
                         'gasPrice': w3_source.eth.gas_price * 2,
                         'nonce': nonce,
                     })
@@ -419,6 +442,8 @@ def create_missing_tokens():
     name = "Wrapped Token"
     symbol = "WTKN"
 
+    # Create tokens one at a time with proper error handling
+    # First token
     try:
         # Get the current nonce
         nonce = w3_dest.eth.get_transaction_count(warden_address)
