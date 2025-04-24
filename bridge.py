@@ -108,9 +108,9 @@ def scan_blocks(chain, contract_info="contract_info.json"):
 
         try:
             # Use create_filter approach from Bridge IV instead of get_logs
-            deposit_filter = source_contract.events.Deposit.create_filter(
-                fromBlock=start_block_source,
-                toBlock=current_block_source
+            deposit_filter = source_contract.events.Deposit.createFilter(
+                from_block=start_block_source,
+                to_block=current_block_source
             )
             deposit_events = deposit_filter.get_all_entries()
             
@@ -177,9 +177,9 @@ def scan_blocks(chain, contract_info="contract_info.json"):
         
         try:
             # Use create_filter approach from Bridge IV instead of get_logs
-            unwrap_filter = dest_contract.events.Unwrap.create_filter(
-                fromBlock=start_block_dest,
-                toBlock=current_block_dest
+            unwrap_filter = dest_contract.events.Unwrap.createFilter(
+                from_block=start_block_dest,
+                to_block=current_block_dest
             )
             unwrap_events = unwrap_filter.get_all_entries()
             
